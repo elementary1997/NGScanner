@@ -4,52 +4,20 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import ru.ngscanner.ui.MainScreen
+import ru.ngscanner.ui.MainViewModel
+import ru.ngscanner.ui.theme.NgScannerTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
-                    HomeScreen(Modifier.padding(padding))
-                }
+            NgScannerTheme {
+                val vm: MainViewModel = viewModel()
+                MainScreen(vm)
             }
         }
     }
-}
-
-@Composable
-private fun HomeScreen(modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("NG Scanner", style = MaterialTheme.typography.headlineMedium)
-        Text(
-            "Диагностика автомобиля через OBD-II и LLM",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-    }
-}
-
-@Preview
-@Composable
-private fun HomeScreenPreview() {
-    MaterialTheme { HomeScreen() }
 }
