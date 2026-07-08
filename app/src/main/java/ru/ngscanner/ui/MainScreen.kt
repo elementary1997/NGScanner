@@ -46,8 +46,12 @@ import androidx.compose.material.icons.rounded.Thermostat
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
@@ -75,6 +79,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import ru.ngscanner.llm.LlmModel
 import ru.ngscanner.llm.ProviderId
 
 private enum class Tab(val label: String, val icon: ImageVector) {
@@ -446,7 +451,6 @@ private fun ChatInput(enabled: Boolean, onSend: (String) -> Unit, onClear: () ->
 @Composable
 private fun SettingsTab(ui: UiState, vm: MainViewModel) {
     var keyText by remember(ui.provider) { mutableStateOf("") }
-    var modelText by remember(ui.provider) { mutableStateOf(ui.model) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -469,14 +473,6 @@ private fun SettingsTab(ui: UiState, vm: MainViewModel) {
         }
 
         OutlinedTextField(
-            value = modelText,
-            onValueChange = { modelText = it; vm.setModel(it) },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Модель") },
-            singleLine = true,
-        )
-
-        OutlinedTextField(
             value = keyText,
             onValueChange = { keyText = it },
             modifier = Modifier.fillMaxWidth(),
@@ -484,24 +480,74 @@ private fun SettingsTab(ui: UiState, vm: MainViewModel) {
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
         )
+
         Button(
-            onClick = { vm.setApiKey(keyText) },
-            enabled = keyText.isNotBlank(),
+            onClick = { vm.testConnection(keyText) },
+            enabled = !ui.testing && keyText.isNotBlank(),
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(16.dp),
         ) {
-            Text("Сохранить ключ")
+            if (ui.testing) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+            } else {
+                Icon(Icons.Rounded.Bolt, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Тест подключения")
+            }
         }
-        Text(
-            if (ui.hasKey) "✓ Ключ сохранён для этого провайдера" else "Ключ не задан",
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (ui.hasKey) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+
+        when (val st = ui.testStatus) {
+            is TestStatus.Success -> Text(
+                "✓ Подключение успешно — выберите модель ниже",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            is TestStatus.Error -> Text(
+                "✗ ${st.message}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            null -> if (ui.hasKey) {
+                Text(
+                    "Ключ сохранён. Нажмите «Тест», чтобы загрузить список моделей.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        if (ui.availableModels.isNotEmpty()) {
+            ModelDropdown(ui.availableModels, ui.model, vm::setModel)
+        }
+
         InfoCard(
             Icons.Rounded.ErrorOutline,
             "Ключ хранится только на устройстве и не попадает в код приложения. " +
                 "Claude — console.anthropic.com; Cloud.ru — личный кабинет (сервисный аккаунт).",
         )
+    }
+}
+
+@Composable
+private fun ModelDropdown(models: List<LlmModel>, selected: String, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val label = models.firstOrNull { it.id == selected }?.label ?: selected
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = label,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Модель") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            models.forEach { m ->
+                DropdownMenuItem(text = { Text(m.label) }, onClick = { onSelect(m.id); expanded = false })
+            }
+        }
     }
 }
 

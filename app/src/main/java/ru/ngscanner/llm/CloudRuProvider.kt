@@ -36,13 +36,22 @@ class CloudRuProvider(
     private val json = Json { ignoreUnknownKeys = true }
     private val http = OkHttpClient.Builder().callTimeout(180, TimeUnit.SECONDS).build()
 
-    // Стартовый список; актуальный набор — через GET /v1/models (TODO).
-    override suspend fun availableModels(): List<LlmModel> = listOf(
-        LlmModel("zai-org/GLM-4.7", "GLM-4.7", supportsTools = true),
-        LlmModel("Qwen/Qwen3.5-397B-A17B", "Qwen 3.5", supportsTools = true),
-        LlmModel("deepseek-ai/DeepSeek-V3.1-Terminus", "DeepSeek V3.1", supportsTools = true),
-        LlmModel("GigaChat/GigaChat-2-Max", "GigaChat 2 Max", supportsTools = true),
-    )
+    override suspend fun availableModels(): List<LlmModel> = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url("$baseUrl/models")
+            .addHeader("Authorization", "Bearer $apiKey")
+            .get()
+            .build()
+        http.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw RuntimeException("Cloud.ru API ${resp.code}: ${text.take(200)}")
+            val data = json.parseToJsonElement(text).jsonObject["data"]?.jsonArray ?: return@use emptyList()
+            data.mapNotNull { m ->
+                val id = m.jsonObject["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                LlmModel(id, id.substringAfterLast('/'), supportsTools = true)
+            }
+        }
+    }
 
     override suspend fun send(request: LlmRequest): LlmResponse = withContext(Dispatchers.IO) {
         val httpReq = Request.Builder()

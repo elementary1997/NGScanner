@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -36,11 +37,24 @@ class ClaudeProvider(
     private val json = Json { ignoreUnknownKeys = true }
     private val http = OkHttpClient.Builder().callTimeout(180, TimeUnit.SECONDS).build()
 
-    override suspend fun availableModels(): List<LlmModel> = listOf(
-        LlmModel("claude-opus-4-8", "Claude Opus 4.8", supportsTools = true),
-        LlmModel("claude-sonnet-5", "Claude Sonnet 5", supportsTools = true),
-        LlmModel("claude-haiku-4-5", "Claude Haiku 4.5", supportsTools = true),
-    )
+    override suspend fun availableModels(): List<LlmModel> = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url("$API_URL/models?limit=100")
+            .addHeader("x-api-key", apiKey)
+            .addHeader("anthropic-version", ANTHROPIC_VERSION)
+            .get()
+            .build()
+        http.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw RuntimeException("Claude API ${resp.code}: ${text.take(200)}")
+            val data = json.parseToJsonElement(text).jsonObject["data"]?.jsonArray ?: return@use emptyList()
+            data.mapNotNull { m ->
+                val o = m.jsonObject
+                val id = o["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                LlmModel(id, o["display_name"]?.jsonPrimitive?.contentOrNull ?: id, supportsTools = true)
+            }
+        }
+    }
 
     override suspend fun send(request: LlmRequest): LlmResponse = withContext(Dispatchers.IO) {
         val httpReq = Request.Builder()

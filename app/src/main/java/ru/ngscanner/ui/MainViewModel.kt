@@ -16,6 +16,7 @@ import ru.ngscanner.bluetooth.BluetoothController
 import ru.ngscanner.llm.ClaudeProvider
 import ru.ngscanner.llm.CloudRuProvider
 import ru.ngscanner.llm.LlmMessage
+import ru.ngscanner.llm.LlmModel
 import ru.ngscanner.llm.LlmProvider
 import ru.ngscanner.llm.ProviderId
 import ru.ngscanner.obd.Elm327
@@ -29,6 +30,12 @@ data class DeviceUi(val name: String, val address: String)
 enum class ChatRole { USER, ASSISTANT, TOOL, SYSTEM }
 
 data class ChatMessage(val role: ChatRole, val text: String)
+
+/** Результат проверки подключения к провайдеру. */
+sealed interface TestStatus {
+    data object Success : TestStatus
+    data class Error(val message: String) : TestStatus
+}
 
 data class UiState(
     // подключение к адаптеру
@@ -47,6 +54,9 @@ data class UiState(
     val provider: ProviderId = ProviderId.CLAUDE,
     val model: String = AppSettings.DEFAULT_MODEL,
     val hasKey: Boolean = false,
+    val testing: Boolean = false,
+    val testStatus: TestStatus? = null,
+    val availableModels: List<LlmModel> = emptyList(),
 )
 
 /**
@@ -144,9 +154,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         appendChat(ChatMessage(ChatRole.USER, text))
         _ui.update { it.copy(diagnosing = true) }
 
-        val provider = buildProvider(_ui.value.provider, key)
-        val agent = DiagnosticAgent(provider, _ui.value.model, ObdToolExecutor(elm))
-
+        val agent = DiagnosticAgent(buildProvider(_ui.value.provider, key), _ui.value.model, ObdToolExecutor(elm))
         viewModelScope.launch {
             try {
                 llmHistory = agent.run(text, llmHistory) { event ->
@@ -182,7 +190,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setProvider(p: ProviderId) {
         settings.provider = p
-        _ui.update { it.copy(provider = p, model = settings.model, hasKey = settings.apiKey(p).isNotBlank()) }
+        _ui.update {
+            it.copy(
+                provider = p,
+                model = settings.model,
+                hasKey = settings.apiKey(p).isNotBlank(),
+                testStatus = null,
+                availableModels = emptyList(),
+            )
+        }
     }
 
     fun setModel(m: String) {
@@ -190,9 +206,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(model = m) }
     }
 
-    fun setApiKey(key: String) {
+    /** Проверяет ключ запросом списка моделей; при успехе сохраняет ключ и модели. */
+    fun testConnection(key: String) {
+        if (key.isBlank() || _ui.value.testing) return
         settings.setApiKey(_ui.value.provider, key)
-        _ui.update { it.copy(hasKey = key.isNotBlank()) }
+        _ui.update { it.copy(testing = true, testStatus = null) }
+        viewModelScope.launch {
+            try {
+                val models = buildProvider(_ui.value.provider, key).availableModels()
+                _ui.update { s ->
+                    val keepModel = models.any { it.id == s.model }
+                    val model = if (keepModel) s.model else models.firstOrNull()?.id ?: s.model
+                    settings.model = model
+                    s.copy(
+                        testing = false,
+                        testStatus = TestStatus.Success,
+                        hasKey = true,
+                        availableModels = models,
+                        model = model,
+                    )
+                }
+            } catch (ex: Exception) {
+                _ui.update {
+                    it.copy(testing = false, testStatus = TestStatus.Error(ex.message ?: "ошибка подключения"))
+                }
+            }
+        }
     }
 
     override fun onCleared() {
