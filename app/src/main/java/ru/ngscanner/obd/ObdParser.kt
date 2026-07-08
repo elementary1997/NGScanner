@@ -26,6 +26,39 @@ object ObdParser {
         return runCatching { hex.substring(idx + 4, idx + 6).toInt(16) - 40 }.getOrNull()
     }
 
+    /**
+     * Коды неисправностей из ответа Mode 03/07 (`43`/`47` + пары байт).
+     * Каждый код: 2 старших бита — система (P/C/B/U), далее — цифры.
+     */
+    fun parseDtcs(raw: String): List<String> {
+        val hex = normalize(raw)
+        val start = hex.indexOf("43").takeIf { it >= 0 } ?: hex.indexOf("47")
+        if (start < 0) return emptyList()
+        val body = hex.substring(start + 2)
+        val codes = mutableListOf<String>()
+        var i = 0
+        while (i + 4 <= body.length) {
+            val word = body.substring(i, i + 4)
+            i += 4
+            if (word == "0000") continue // заполнитель
+            runCatching { decodeDtc(word) }.getOrNull()?.let { codes.add(it) }
+        }
+        return codes
+    }
+
+    private fun decodeDtc(word: String): String {
+        val value = word.toInt(16)
+        val system = when (value ushr 14) {
+            0 -> 'P'
+            1 -> 'C'
+            2 -> 'B'
+            else -> 'U'
+        }
+        val d1 = (value ushr 12) and 0x3
+        val rest = value and 0x0FFF
+        return "$system$d1" + "%03X".format(rest)
+    }
+
     private fun normalize(raw: String): String =
         raw.uppercase().replace(Regex("[^0-9A-F]"), "")
 }

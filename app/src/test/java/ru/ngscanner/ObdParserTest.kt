@@ -33,4 +33,10 @@ class ObdParserTest {
     fun parsesCoolantTemp() {
         assertEquals(50, ObdParser.parseCoolantTemp("41 05 5A"))
     }
+
+    // 43 01 33 → код P0133
+    @Test
+    fun parsesDtcCode() {
+        assertEquals(listOf("P0133"), ObdParser.parseDtcs("43 01 33"))
+    }
 }
