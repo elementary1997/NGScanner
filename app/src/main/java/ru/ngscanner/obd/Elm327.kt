@@ -1,18 +1,21 @@
 package ru.ngscanner.obd
 
+import kotlinx.coroutines.delay
 import ru.ngscanner.transport.ObdTransport
 
 /**
  * Драйвер ELM327 поверх произвольного [ObdTransport].
- * Отвечает за инициализацию адаптера и отправку OBD-II запросов
- * (AT-команды конфигурации + PID-запросы к ЭБУ).
+ * Инициализация адаптера и отправка OBD-II запросов.
  */
 class Elm327(private val transport: ObdTransport) {
 
     /** Последовательность инициализации адаптера перед работой. */
     suspend fun initialize() {
-        // TODO(этап 1): прогнать INIT_SEQUENCE, проверить ответы, определить протокол.
-        TODO("Этап 1: инициализация ELM327")
+        for (cmd in INIT_SEQUENCE) {
+            transport.write(cmd)
+            transport.readResponse()
+            delay(120)
+        }
     }
 
     /** Отправить сырую команду (AT или PID) и вернуть ответ адаптера. */
@@ -21,9 +24,15 @@ class Elm327(private val transport: ObdTransport) {
         return transport.readResponse()
     }
 
+    /** Обороты двигателя (Mode 01, PID 0C). `null`, если ответ не распознан. */
+    suspend fun readEngineRpm(): Int? = ObdParser.parseRpm(command("010C"))
+
+    /** Температура охлаждающей жидкости (Mode 01, PID 05), °C. */
+    suspend fun readCoolantTemp(): Int? = ObdParser.parseCoolantTemp(command("0105"))
+
     companion object {
-        /** ATZ — сброс; ATE0 — эхо выкл; ATL0 — перевод строк выкл; ATS0 — пробелы выкл;
-         *  ATSP0 — автоопределение протокола. */
+        /** ATZ — сброс; ATE0 — эхо выкл; ATL0 — переводы строк выкл;
+         *  ATS0 — пробелы выкл; ATSP0 — автоопределение протокола. */
         val INIT_SEQUENCE = listOf("ATZ", "ATE0", "ATL0", "ATS0", "ATSP0")
     }
 }

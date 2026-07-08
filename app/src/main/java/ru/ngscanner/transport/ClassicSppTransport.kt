@@ -1,12 +1,23 @@
 package ru.ngscanner.transport
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothSocket
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import java.io.InputStream
+import java.io.OutputStream
 import java.util.UUID
 
 /**
  * Транспорт поверх классического Bluetooth (RFCOMM / Serial Port Profile).
- * Подходит большинству дешёвых клонов ELM327 (v1.5 / v2.1).
+ * Подходит большинству дешёвых клонов ELM327 (в т.ч. «ELM327 mini» v1.5 / v2.1).
+ *
+ * Разрешение `BLUETOOTH_CONNECT` (Android 12+) запрашивается в UI до вызова
+ * [connect], поэтому вызовы Bluetooth API помечены `@SuppressLint`.
  */
+@SuppressLint("MissingPermission")
 class ClassicSppTransport(
     private val device: BluetoothDevice,
 ) : ObdTransport {
@@ -19,22 +30,65 @@ class ClassicSppTransport(
     /** Стандартный UUID профиля Serial Port Profile. */
     private val sppUuid: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
+    private var socket: BluetoothSocket? = null
+    private var input: InputStream? = null
+    private var output: OutputStream? = null
+
     override suspend fun connect() {
-        // TODO(этап 1): device.createRfcommSocketToServiceRecord(sppUuid) + socket.connect();
-        //   при неудаче — резервный путь через рефлексию createRfcommSocket(1).
-        TODO("Этап 1: подключение по RFCOMM (device=$device, uuid=$sppUuid)")
+        withContext(Dispatchers.IO) {
+            try {
+                val s = try {
+                    device.createRfcommSocketToServiceRecord(sppUuid).apply { connect() }
+                } catch (_: Exception) {
+                    // Резервный путь для «капризных» клонов, не отдающих SPP-запись.
+                    (device.javaClass
+                        .getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                        .invoke(device, 1) as BluetoothSocket).apply { connect() }
+                }
+                socket = s
+                input = s.inputStream
+                output = s.outputStream
+                isConnected = true
+            } catch (e: Exception) {
+                close()
+                throw ObdTransportException("Не удалось подключиться к адаптеру: ${e.message}", e)
+            }
+        }
     }
 
     override suspend fun write(command: String) {
-        TODO("Этап 1: запись в выходной поток RFCOMM-сокета")
+        withContext(Dispatchers.IO) {
+            val out = output ?: throw ObdTransportException("Нет активного соединения")
+            out.write((command + "\r").toByteArray())
+            out.flush()
+        }
     }
 
-    override suspend fun readResponse(timeoutMs: Long): String {
-        TODO("Этап 1: чтение из входного потока до символа '>'")
+    override suspend fun readResponse(timeoutMs: Long): String = withContext(Dispatchers.IO) {
+        val inp = input ?: throw ObdTransportException("Нет активного соединения")
+        val sb = StringBuilder()
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (inp.available() > 0) {
+                val c = inp.read()
+                if (c == -1) break
+                val ch = c.toChar()
+                if (ch == '>') break // приглашение ELM327 — конец ответа
+                sb.append(ch)
+            } else {
+                delay(20)
+            }
+        }
+        sb.toString().trim()
     }
 
     override fun close() {
         isConnected = false
-        // TODO(этап 1): закрыть сокет и потоки.
+        runCatching { input?.close() }
+        runCatching { output?.close() }
+        runCatching { socket?.close() }
+        input = null
+        output = null
+        socket = null
     }
 }
