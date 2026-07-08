@@ -77,9 +77,6 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
 
-    // Anthropic Claude — официальный Java SDK (используется из Kotlin)
-    implementation(libs.anthropic.java)
-
     debugImplementation(libs.androidx.ui.tooling)
 
     testImplementation(libs.junit)
