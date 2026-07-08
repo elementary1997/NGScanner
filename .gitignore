@@ -1,0 +1,32 @@
+# Gradle
+.gradle/
+build/
+/app/build/
+/build/
+
+# Android
+*.apk
+*.aab
+*.ap_
+*.dex
+local.properties
+.cxx/
+captures/
+*.keystore
+!debug.keystore
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.DS_Store
+
+# Kotlin
+.kotlin/
+
+# Secrets — never commit API keys
+secrets.properties
+*.env
+!.env.example
