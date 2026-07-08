@@ -1,0 +1,4 @@
+<resources>
+    <!-- Базовая тема окна; UI полностью рисует Jetpack Compose. -->
+    <style name="Theme.NGScanner" parent="@android:style/Theme.Material.NoActionBar" />
+</resources>
