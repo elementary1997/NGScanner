@@ -40,6 +40,24 @@ android {
     buildFeatures {
         compose = true
     }
+
+    packaging {
+        resources {
+            // Зависимости (Anthropic SDK → Apache HttpComponents) приносят
+            // одноимённые META-INF файлы — при упаковке APK берём по одному.
+            excludes += setOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/LICENSE.md",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+                "META-INF/NOTICE.md",
+                "META-INF/INDEX.LIST",
+                "META-INF/{AL2.0,LGPL2.1}",
+            )
+        }
+    }
 }
 
 dependencies {
