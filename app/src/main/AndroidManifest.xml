@@ -8,8 +8,9 @@
     <!-- Bluetooth до Android 12 (API 30 и ниже). -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <!-- BLE-сканирование до Android 12 требует геолокацию. -->
+    <!-- BLE-сканирование до Android 12 требует геолокацию (FINE + COARSE вместе). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="30" />
 
     <!-- Bluetooth на Android 12+ (API 31+). -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
