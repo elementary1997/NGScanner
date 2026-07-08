@@ -76,18 +76,18 @@
 
 ## Технологии
 
-Kotlin · Jetpack Compose · Kotlin Coroutines · Anthropic Java SDK · OkHttp ·
-kotlinx.serialization · Gradle (version catalog).
+Kotlin · Jetpack Compose · Kotlin Coroutines · OkHttp · kotlinx.serialization ·
+Gradle (version catalog). Оба LLM-провайдера — тонкие HTTP-клиенты (см. ADR 0002).
 
 Требования: **JDK 17**, Android SDK (`compileSdk 35`), `minSdk 26` (Android 8.0).
 
 ## Дорожная карта
 
 - [x] **Этап 0.** Каркас: архитектура, абстракции, сборка, CI
-- [ ] **Этап 1.** Bluetooth-подключение + инициализация ELM327 + первый PID (снятие риска «железа»)
-- [ ] **Этап 2.** OBD-слой: DTC, freeze frame, живые данные, VIN + база кодов
-- [ ] **Этап 3.** Интеграция LLM: инструменты, агентный цикл, оба провайдера
-- [ ] **Этап 4.** UI: чат-диагностика + дашборд параметров
+- [x] **Этап 1.** Bluetooth-подключение (classic SPP), инициализация ELM327, чтение параметров
+- [~] **Этап 2.** OBD-слой: коды (DTC), freeze frame, живые данные, VIN — базово; локальная база кодов ещё предстоит
+- [x] **Этап 3.** Интеграция LLM: инструменты, агентный цикл, провайдеры Claude и Cloud.ru
+- [x] **Этап 4.** UI: чат-диагностика + дашборд параметров + настройки
 - [ ] **Этап 5.** Надёжность: foreground service, переподключения, обработка ошибок
 
 ## Сборка

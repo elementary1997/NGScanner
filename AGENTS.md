@@ -17,7 +17,7 @@ OBD-II адаптеру ELM327 по Bluetooth, чтение данных с ЭБ
 - **Kotlin** + **Jetpack Compose**, Kotlin Coroutines
 - **JDK 17**, Android SDK: `compileSdk 35`, `minSdk 26` (Android 8.0)
 - **Gradle** (wrapper 8.11.1) с version catalog
-- Anthropic Java SDK, OkHttp, kotlinx.serialization
+- OkHttp, kotlinx.serialization (оба LLM-провайдера работают через HTTP — см. ADR 0002)
 
 Точные версии — **единственный источник** [`gradle/libs.versions.toml`](gradle/libs.versions.toml).
 Зависимости добавляются только через этот каталог, не хардкодом в `build.gradle.kts`.
@@ -41,7 +41,9 @@ app/src/main/java/ru/ngscanner/
   transport/           ObdTransport + ClassicSppTransport, BleTransport
   obd/                 Elm327 (драйвер), ObdPid (каталог PID)
   llm/                 LlmProvider + ClaudeProvider, CloudRuProvider
-  agent/               DiagnosticAgent (цикл), ObdTools (каталог инструментов)
+  agent/               DiagnosticAgent (цикл), ObdTools, ObdToolExecutor
+  settings/            хранилище настроек и API-ключей
+  ui/                  Compose-экран, тема, ViewModel
 ```
 
 ## Ключевые абстракции — не ломать
