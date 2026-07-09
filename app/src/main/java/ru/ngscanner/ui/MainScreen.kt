@@ -153,6 +153,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -306,6 +307,7 @@ private fun DevicesTab(
         when (ui.connection) {
             ConnectionState.Connected -> Dashboard(
                 metrics = ui.metrics,
+                history = ui.history,
                 onDisconnect = onDisconnect,
                 modelNorms = ui.modelNorms,
                 normLoadingPid = ui.normLoadingPid,
@@ -472,6 +474,7 @@ private enum class MetricStatus { NORMAL, WARNING, CRITICAL }
 @Composable
 private fun Dashboard(
     metrics: Map<ObdPid, Double>,
+    history: Map<ObdPid, List<Double>>,
     onDisconnect: () -> Unit,
     modelNorms: Map<String, String>,
     normLoadingPid: String?,
@@ -512,6 +515,7 @@ private fun Dashboard(
         MetricInfoSheet(
             pid = pid,
             value = metrics[pid],
+            history = history[pid].orEmpty(),
             onDismiss = { infoPid = null },
             modelNorm = modelNorms[pid.cmd],
             loading = normLoadingPid == pid.cmd,
@@ -744,6 +748,7 @@ private fun statusIcon(status: MetricStatus): ImageVector = when (status) {
 private fun MetricInfoSheet(
     pid: ObdPid,
     value: Double?,
+    history: List<Double>,
     onDismiss: () -> Unit,
     modelNorm: String?,
     loading: Boolean,
@@ -792,6 +797,21 @@ private fun MetricInfoSheet(
             }
             Spacer(Modifier.height(16.dp))
             Text(pid.about, style = MaterialTheme.typography.bodyMedium, color = cs.onSurface, lineHeight = 21.sp)
+            if (history.size >= 2) {
+                Spacer(Modifier.height(18.dp))
+                Text(
+                    "ТРЕНД · ПОСЛЕДНИЕ ${history.size}",
+                    style = MaterialTheme.typography.labelSmall,
+                    letterSpacing = 1.sp,
+                    color = cs.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                Sparkline(
+                    values = history,
+                    color = if (status == MetricStatus.NORMAL) cs.primary else statusColor,
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                )
+            }
             Spacer(Modifier.height(18.dp))
             NormBox("Норма (общая)", pid.norm, cs.onSurface, Modifier.fillMaxWidth())
             Spacer(Modifier.height(12.dp))
@@ -847,6 +867,32 @@ private fun NormBox(caption: String, value: String, valueColor: Color, modifier:
             Spacer(Modifier.height(5.dp))
             Text(value, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace, color = valueColor)
         }
+    }
+}
+
+/** Мини-график тренда (sparkline) по истории значений параметра. */
+@Composable
+private fun Sparkline(values: List<Double>, color: Color, modifier: Modifier) {
+    Canvas(modifier) {
+        if (values.size < 2) return@Canvas
+        val min = values.min()
+        val max = values.max()
+        val range = (max - min).takeIf { it > 0.0001 } ?: 1.0
+        val stepX = size.width / (values.size - 1)
+        fun yAt(v: Double) = size.height - ((v - min) / range).toFloat() * size.height
+        val line = Path()
+        val area = Path().apply { moveTo(0f, size.height) }
+        values.forEachIndexed { i, v ->
+            val x = i * stepX
+            val y = yAt(v)
+            if (i == 0) line.moveTo(x, y) else line.lineTo(x, y)
+            area.lineTo(x, y)
+        }
+        area.lineTo(size.width, size.height)
+        area.close()
+        drawPath(area, color.copy(alpha = 0.15f))
+        drawPath(line, color, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+        drawCircle(color, 3.dp.toPx(), Offset((values.size - 1) * stepX, yAt(values.last())))
     }
 }
 
