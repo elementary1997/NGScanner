@@ -49,11 +49,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.HealthAndSafety
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.AssistChip
@@ -82,6 +86,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import ru.ngscanner.ui.theme.StatusGood
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -428,9 +434,16 @@ private fun ChatBubble(msg: ChatMessage, onExportPdf: (String) -> Unit) {
                         },
                 ) {
                     if (msg.role == ChatRole.ASSISTANT) {
-                        // Markdown-ответ модели рендерится; широкие таблицы предварительно
-                        // сплющиваются в список, иначе на узком экране их не прочитать.
-                        Markdown(content = flattenMarkdownTables(msg.text), modifier = Modifier.padding(14.dp))
+                        // Метку тяжести [СТАТУС: …] выносим в цветную плашку «можно ли ехать»,
+                        // а из текста убираем; таблицы сплющиваем — на узком экране их не прочитать.
+                        val (severity, body) = remember(msg.text) { extractSeverity(msg.text) }
+                        Column(Modifier.padding(14.dp)) {
+                            severity?.let {
+                                SeverityBadge(it)
+                                Spacer(Modifier.height(10.dp))
+                            }
+                            Markdown(content = flattenMarkdownTables(body))
+                        }
                     } else {
                         Text(msg.text, Modifier.padding(14.dp), color = fg, style = MaterialTheme.typography.bodyMedium)
                     }
@@ -586,3 +599,44 @@ private fun ChatInput(
 private const val QUICK_DIAGNOSE_PROMPT =
     "Проведи диагностику автомобиля: прочитай активные коды неисправностей и текущие " +
         "параметры двигателя, затем дай понятный вердикт — что вероятно неисправно и что делать."
+
+/** Уровень тяжести вердикта агента для цветной плашки «можно ли ехать». */
+private enum class Severity { CRITICAL, WARNING, NORMAL, NEEDS_DATA }
+
+private val SEVERITY_REGEX =
+    Regex("^\\s*\\[СТАТУС:\\s*(КРИТИЧНО|ВНИМАНИЕ|НОРМА|НУЖНЫ ДАННЫЕ)\\]\\s*", RegexOption.IGNORE_CASE)
+
+/** Извлекает метку тяжести из начала ответа агента; возвращает уровень и текст без метки. */
+private fun extractSeverity(text: String): Pair<Severity?, String> {
+    val m = SEVERITY_REGEX.find(text) ?: return null to text
+    val sev = when (m.groupValues[1].uppercase()) {
+        "КРИТИЧНО" -> Severity.CRITICAL
+        "ВНИМАНИЕ" -> Severity.WARNING
+        "НОРМА" -> Severity.NORMAL
+        else -> Severity.NEEDS_DATA
+    }
+    return sev to text.removeRange(m.range).trimStart()
+}
+
+/** Цветная плашка тяжести над ответом агента — сразу видно «можно ли ехать». */
+@Composable
+private fun SeverityBadge(severity: Severity) {
+    val cs = MaterialTheme.colorScheme
+    data class Look(val color: Color, val icon: ImageVector, val label: String)
+    val look = when (severity) {
+        Severity.CRITICAL -> Look(cs.error, Icons.Rounded.Error, "Критично — ехать нельзя")
+        Severity.WARNING -> Look(cs.tertiary, Icons.Rounded.Warning, "Внимание — до сервиса аккуратно")
+        Severity.NORMAL -> Look(StatusGood, Icons.Rounded.CheckCircle, "Можно ездить, наблюдать")
+        Severity.NEEDS_DATA -> Look(cs.onSurfaceVariant, Icons.Rounded.Info, "Нужны данные для вывода")
+    }
+    Surface(shape = RoundedCornerShape(10.dp), color = look.color.copy(alpha = 0.15f)) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(look.icon, null, Modifier.size(20.dp), tint = look.color)
+            Spacer(Modifier.width(8.dp))
+            Text(look.label, color = look.color, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
