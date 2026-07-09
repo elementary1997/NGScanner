@@ -2,7 +2,6 @@
 
 package ru.ngscanner.ui.components
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,9 +69,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -88,30 +85,11 @@ internal fun Dashboard(
     metrics: Map<ObdPid, Double>,
     history: Map<ObdPid, List<MetricSample>>,
     onDisconnect: () -> Unit,
-    modelNorms: Map<String, String>,
-    normLoadingPid: String?,
-    onRequestNorm: (ObdPid) -> Unit,
-    activeCarTitle: String?,
+    onOpenGraph: (ObdPid) -> Unit,
 ) {
-    var graphPid by remember { mutableStateOf<ObdPid?>(null) }
-
-    // Тап по прибору открывает полноэкранный график параметра; «назад» его закрывает.
-    graphPid?.let { pid ->
-        BackHandler { graphPid = null }
-        ParameterGraphScreen(
-            pid = pid,
-            value = metrics[pid],
-            history = history,
-            onBack = { graphPid = null },
-            modelNorm = modelNorms[pid.cmd],
-            loading = normLoadingPid == pid.cmd,
-            onRequestNorm = onRequestNorm,
-            activeCarTitle = activeCarTitle,
-        )
-        return
-    }
-
-    val onTap: (ObdPid) -> Unit = { graphPid = it }
+    // Тап по прибору открывает полноэкранный график — навигация живёт в DevicesTab
+    // (график заменяет весь экран, а не вкладывается в скролл дашборда).
+    val onTap: (ObdPid) -> Unit = onOpenGraph
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(13.dp)) {
             CircularGauge(ObdPid.RPM, metrics[ObdPid.RPM], onTap, Modifier.weight(1f))

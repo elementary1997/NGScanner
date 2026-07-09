@@ -37,7 +37,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -91,7 +90,8 @@ internal fun ParameterGraphScreen(
     val available = remember(history) {
         history.filter { it.key != pid && it.value.size >= 2 }.keys.sortedBy { it.ordinal }
     }
-    var selected by rememberSaveable { mutableStateOf(setOf<String>()) }
+    // Транзиентный выбор наложенных серий (Set не сохраняется в Bundle — только remember).
+    var selected by remember { mutableStateOf(setOf<String>()) }
     val overlays = available
         .filter { it.name in selected }
         .map { OverlaySeries(it, history[it].orEmpty(), OVERLAY_COLORS[available.indexOf(it) % OVERLAY_COLORS.size]) }

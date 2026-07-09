@@ -1,5 +1,6 @@
 package ru.ngscanner.ui.components
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,6 +28,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -50,6 +55,24 @@ internal fun DevicesTab(
     onRequestNorm: (ObdPid) -> Unit,
     onOpenConnection: () -> Unit,
 ) {
+    var graphPid by remember { mutableStateOf<ObdPid?>(null) }
+    val graph = graphPid
+    // Полноэкранный график заменяет весь экран вкладки (у него собственный скролл),
+    // а не вкладывается в скролл дашборда — иначе вложенные verticalScroll падают.
+    if (graph != null && ui.connection == ConnectionState.Connected) {
+        BackHandler { graphPid = null }
+        ParameterGraphScreen(
+            pid = graph,
+            value = ui.metrics[graph],
+            history = ui.history,
+            onBack = { graphPid = null },
+            modelNorm = ui.modelNorms[graph.cmd],
+            loading = ui.normLoadingPid == graph.cmd,
+            onRequestNorm = onRequestNorm,
+            activeCarTitle = ui.garage.activeCar?.title,
+        )
+        return
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -64,10 +87,7 @@ internal fun DevicesTab(
                 metrics = ui.metrics,
                 history = ui.history,
                 onDisconnect = onDisconnect,
-                modelNorms = ui.modelNorms,
-                normLoadingPid = ui.normLoadingPid,
-                onRequestNorm = onRequestNorm,
-                activeCarTitle = ui.garage.activeCar?.title,
+                onOpenGraph = { graphPid = it },
             )
             ConnectionState.Connecting -> ConnectingCard()
             ConnectionState.Disconnected -> FavoritesQuickConnect(ui.favorites, onConnect, onOpenConnection)
