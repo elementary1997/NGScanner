@@ -38,6 +38,19 @@ class Elm327(private val transport: ObdTransport) {
         return runCatching { pid.decode(data) }.getOrNull()
     }
 
+    /**
+     * Набор команд PID Mode 01, которые поддерживает данный автомобиль
+     * (по маскам 0100/0120/0140). Пустой набор — не удалось определить.
+     */
+    suspend fun readSupportedPids(): Set<String> {
+        val supported = mutableSetOf<String>()
+        for (base in listOf(0x00, 0x20, 0x40)) {
+            val nums = ObdParser.supportedPids(command("01" + "%02X".format(base)), base)
+            nums.forEach { supported.add("01" + "%02X".format(it)) }
+        }
+        return supported
+    }
+
     /** Обороты двигателя (Mode 01, PID 0C). `null`, если ответ не распознан. */
     suspend fun readEngineRpm(): Int? = ObdParser.parseRpm(command("010C"))
 

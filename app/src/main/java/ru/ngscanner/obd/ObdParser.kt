@@ -122,6 +122,23 @@ object ObdParser {
         return vin.takeIf { it.length >= 11 }?.take(17)
     }
 
+    /**
+     * Номера поддерживаемых PID из ответа на маску 0100/0120/0140.
+     * Ответ — 4 байта (32 бита): старший бит соответствует `base + 1`.
+     * Например для 0100 бит 31 → PID 0x01, бит 0 → PID 0x20.
+     */
+    fun supportedPids(raw: String, base: Int): List<Int> {
+        val data = dataBytes(raw, "01" + "%02X".format(base)) ?: return emptyList()
+        if (data.size < 4) return emptyList()
+        val bits = (data[0].toLong() shl 24) or (data[1].toLong() shl 16) or
+            (data[2].toLong() shl 8) or data[3].toLong()
+        val result = mutableListOf<Int>()
+        for (i in 0 until 32) {
+            if ((bits shr (31 - i)) and 1L == 1L) result.add(base + i + 1)
+        }
+        return result
+    }
+
     /** Байты данных (A,B,…) из ответа на команду «01XX» → после заголовка «41XX». */
     fun dataBytes(raw: String, cmd: String): IntArray? {
         val hex = normalize(raw)
