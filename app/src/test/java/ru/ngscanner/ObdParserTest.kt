@@ -207,4 +207,77 @@ class ObdParserTest {
         val result = ObdParser.parseDtcs(raw) as DtcResult.Ok
         assertEquals(listOf("P0133", "P0420", "P0301", "P0171", "P0300"), result.codes)
     }
+
+    // ---- DTC: Mode 0A (permanent), заголовок ответа 4A — формат как 43/47 ----
+    @Test
+    fun parsesPermanentDtcCan() {
+        // 4A 02 0133 0420 → счётчик 02, коды P0133 и P0420 (вектор из сверки формата).
+        val result = ObdParser.parseDtcs("4A 02 01 33 04 20", isCan = true) as DtcResult.Ok
+        assertEquals(listOf("P0133", "P0420"), result.codes)
+    }
+
+    @Test
+    fun parsesPermanentDtcAllSystems() {
+        // 4A 04 + P/C/B/U с первой цифрой 0: 0133/4133/8133/C133.
+        val result = ObdParser.parseDtcs("4A 04 01 33 41 33 81 33 C1 33", isCan = true) as DtcResult.Ok
+        assertEquals(listOf("P0133", "C0133", "B0133", "U0133"), result.codes)
+    }
+
+    @Test
+    fun permanentDtcEmptyIsOkNotNoData() {
+        // 4A 00 — ЭБУ ответил, постоянных кодов нет (не путать с NO DATA).
+        val result = ObdParser.parseDtcs("4A 00", isCan = true)
+        assertTrue(result is DtcResult.Ok)
+        assertTrue((result as DtcResult.Ok).codes.isEmpty())
+    }
+
+    // ---- Readiness: Mode 01 PID 01 (вектор из сверки с python-OBD) ----
+    @Test
+    fun parsesReadinessSparkVector() {
+        // 41 01 81 07 65 04: MIL горит, 1 код, бензин; Catalyst готов, EVAP не готов,
+        // датчик O2 и его подогрев готовы.
+        val r = ObdParser.parseReadiness("41 01 81 07 65 04")!!
+        assertTrue(r.milOn)
+        assertEquals(1, r.dtcCount)
+        assertEquals(false, r.compression)
+        // Непрерывные (B=07): все три поддержаны и готовы.
+        assertTrue(r.monitors.first { it.name == "Пропуски воспламенения" }.ready)
+        // Разовые: C=65 (Catalyst,EVAP,O2,O2-heater поддержаны), D=04 (только EVAP не готов).
+        assertTrue(r.monitors.first { it.name == "Катализатор" }.ready)
+        assertEquals(false, r.monitors.first { it.name == "Система EVAP" }.ready)
+        assertTrue(r.monitors.first { it.name == "Датчик кислорода" }.ready)
+    }
+
+    @Test
+    fun parsesReadinessCompressionIgnitionType() {
+        // 41 01 00 0F 6B 08: MIL off, дизель (B3=1); Наддув не готов (D3=1).
+        val r = ObdParser.parseReadiness("41 01 00 0F 6B 08")!!
+        assertEquals(false, r.milOn)
+        assertTrue(r.compression)
+        assertEquals(false, r.monitors.first { it.name == "Наддув" }.ready)
+        assertTrue(r.monitors.first { it.name == "NMHC-катализатор" }.ready)
+    }
+
+    @Test
+    fun readinessWithCanHeader() {
+        // 7E8 06 41 01 81 07 65 04 — с заголовком (ATH1) статус тоже читается.
+        val r = ObdParser.parseReadiness("7E8064101810765 04", headerHexLen = 3)!!
+        assertTrue(r.milOn)
+        assertEquals(1, r.dtcCount)
+    }
+
+    // ---- Calibration ID: Mode 09 PID 04 (векторы из сверки формата) ----
+    @Test
+    fun parsesSingleCalibrationId() {
+        // 49 04 01 + 16 байт «39800000AC» с правым паддингом 00.
+        val raw = "49 04 01 33 39 38 30 30 30 30 30 41 43 00 00 00 00 00 00"
+        assertEquals(listOf("39800000AC"), ObdParser.parseCalibrationIds(raw))
+    }
+
+    @Test
+    fun parsesTwoCalibrationIds() {
+        // 49 04 02 + два блока по 16 байт: «JMB*36761500» и «JMB*36751200».
+        val raw = "49 04 02 4A4D422A3336373631353030 00000000 4A4D422A3336373531323030 00000000"
+        assertEquals(listOf("JMB*36761500", "JMB*36751200"), ObdParser.parseCalibrationIds(raw))
+    }
 }

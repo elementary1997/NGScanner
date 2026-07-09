@@ -47,7 +47,7 @@ object ObdParser {
     }
 
     /**
-     * Коды неисправностей из ответа Mode 03/07 (`43`/`47` + пары байт).
+     * Коды неисправностей из ответа Mode 03/07/0A (`43`/`47`/`4A` + пары байт).
      * Каждый код: 2 старших бита — система (P/C/B/U), далее — цифры.
      *
      * [isCan] — протокол ЭБУ: в CAN (ISO 15765-4) после заголовка идёт
@@ -71,7 +71,11 @@ object ObdParser {
         val codes = mutableListOf<String>()
         var sawHeader = false
         for (msg in messages) {
-            val start = msg.indexOf("43").takeIf { it >= 0 } ?: msg.indexOf("47")
+            // Заголовок ответа режима стоит в начале собранного payload: 43 (Mode 03),
+            // 47 (Mode 07) или 4A (Mode 0A). Берём самый ранний — это и есть заголовок.
+            val start = listOf("43", "47", "4A")
+                .mapNotNull { h -> msg.indexOf(h).takeIf { it >= 0 } }
+                .minOrNull() ?: -1
             if (start < 0) continue
             sawHeader = true
             codes += parseDtcPayload(msg.substring(start + 2), isCan)
@@ -154,6 +158,88 @@ object ObdParser {
             .joinToString("")
         val vin = ascii.filter { it.isLetterOrDigit() }
         return vin.takeIf { it.length >= 11 }?.take(17)
+    }
+
+    /** Один бортовой монитор готовности: поддерживается ли и завершён ли самотест. */
+    data class Monitor(val name: String, val ready: Boolean)
+
+    /**
+     * Готовность бортовых мониторов (Mode 01 PID 01). [milOn] — горит ли Check Engine,
+     * [dtcCount] — число подтверждённых emission-кодов, [compression] — дизель (иначе бензин),
+     * [monitors] — только поддерживаемые данным авто мониторы.
+     */
+    data class Readiness(
+        val milOn: Boolean,
+        val dtcCount: Int,
+        val compression: Boolean,
+        val monitors: List<Monitor>,
+    )
+
+    // Наборы непрерывных и разовых мониторов (порядок бит 0..7 в байтах C/D).
+    // Выверено по python-OBD (obd/codes.py) — см. sae J1979 / ISO 15031-5.
+    private val CONTINUOUS = listOf("Пропуски воспламенения", "Топливная система", "Компоненты")
+    private val SPARK_MONITORS = listOf(
+        "Катализатор", "Подогрев катализатора", "Система EVAP", "Вторичный воздух",
+        "Хладагент A/C", "Датчик кислорода", "Подогрев датчика O₂", "EGR/VVT",
+    )
+    private val COMPRESSION_MONITORS = listOf(
+        "NMHC-катализатор", "NOx/SCR", null, "Наддув",
+        null, "Датчик ОГ", "Сажевый фильтр", "EGR/VVT",
+    )
+
+    /**
+     * Статус готовности мониторов из Mode 01 PID 01 (`41 01 A B C D`).
+     * A7 — MIL, A6..A0 — число кодов; B3 — тип зажигания (0 бензин / 1 дизель);
+     * непрерывные мониторы в B (supported B0..B2, complete B4..B6, где бит=0 — готов),
+     * разовые — байт C (supported=1) и D (complete: бит=0 — готов). Монитор считаем
+     * присутствующим только при supported; готов = supported и complete-бит равен 0.
+     */
+    fun parseReadiness(raw: String, headerHexLen: Int = 0): Readiness? {
+        val data = dataBytes(raw, "0101") ?: return null
+        if (data.size < 4) return null
+        val (a, b, c, d) = listOf(data[0], data[1], data[2], data[3])
+        val monitors = mutableListOf<Monitor>()
+        // Непрерывные (байт B): supported B0..B2, «не готов» B4..B6 (бит=1 → не завершён).
+        for (i in 0..2) {
+            if ((b shr i) and 1 == 1) monitors.add(Monitor(CONTINUOUS[i], ready = (b shr (i + 4)) and 1 == 0))
+        }
+        // Разовые (байт C supported, байт D готовность). Набор зависит от типа двигателя.
+        val compression = (b shr 3) and 1 == 1
+        val names = if (compression) COMPRESSION_MONITORS else SPARK_MONITORS
+        for (i in 0..7) {
+            val name = names[i] ?: continue
+            if ((c shr i) and 1 == 1) monitors.add(Monitor(name, ready = (d shr i) and 1 == 0))
+        }
+        return Readiness(milOn = (a and 0x80) != 0, dtcCount = a and 0x7F, compression = compression, monitors = monitors)
+    }
+
+    /**
+     * Номера калибровок ЭБУ (прошивок) из Mode 09 PID 04 (`49 04 NODI + NODI×16 байт ASCII`).
+     * После заголовка `4904` идёт байт-счётчик числа калибровок, затем блоки строго по
+     * 16 байт (правый паддинг `00`). Отвечать может несколько ЭБУ — берём первый.
+     */
+    fun parseCalibrationIds(raw: String, headerHexLen: Int = 0): List<String> {
+        val hex = IsoTp.messages(raw, headerHexLen).firstOrNull { it.contains("4904") } ?: normalize(raw)
+        val idx = hex.indexOf("4904")
+        if (idx < 0) return emptyList()
+        val after = hex.substring(idx + 4)
+        if (after.length < 2) return emptyList()
+        val count = after.substring(0, 2).toIntOrNull(16) ?: return emptyList()
+        val body = after.drop(2)
+        // Число блоков берём по счётчику; при неадекватном счётчике — по длине тела.
+        val blocks = if (count in 1..16) count else body.length / 32
+        val result = mutableListOf<String>()
+        var i = 0
+        repeat(blocks) {
+            if (i + 32 > body.length) return@repeat
+            val ascii = body.substring(i, i + 32).chunked(2)
+                .mapNotNull { runCatching { it.toInt(16) }.getOrNull() }
+                .filter { it in 0x20..0x7E } // печатаемые; хвостовой паддинг 00 отсекается
+                .map { it.toChar() }.joinToString("").trim()
+            i += 32
+            if (ascii.isNotBlank()) result.add(ascii)
+        }
+        return result
     }
 
     /**

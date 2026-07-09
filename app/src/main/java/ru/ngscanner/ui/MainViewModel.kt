@@ -48,6 +48,7 @@ import ru.ngscanner.llm.ToolCall
 import ru.ngscanner.llm.LlmException
 import ru.ngscanner.obd.DtcDatabase
 import ru.ngscanner.obd.Elm327
+import ru.ngscanner.obd.ObdParser
 import ru.ngscanner.obd.ObdPid
 import ru.ngscanner.service.ObdForegroundService
 import ru.ngscanner.settings.AppSettings
@@ -119,6 +120,9 @@ data class UiState(
     val vinDecoding: Boolean = false,
     val vinResult: VinInfo? = null,
     val vinError: String? = null,
+    // VIN, считанный прямо с ЭБУ (Mode 09): подставляется в поле формы добавления по VIN.
+    val vinScanning: Boolean = false,
+    val ecuVin: String? = null,
     // модельные нормы параметров для активной машины: pidCmd -> текст нормы
     val modelNorms: Map<String, String> = emptyMap(),
     val normLoadingPid: String? = null,
@@ -551,7 +555,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 val active = executor.execute(ToolCall("l1", "read_dtcs", "{}")).content
                 val pending = executor.execute(ToolCall("l2", "read_pending_dtcs", "{}")).content
-                appendChat(ChatMessage(ChatRole.ASSISTANT, buildLocalReport(active, pending, _ui.value.metrics)))
+                val permanent = executor.execute(ToolCall("l3", "read_permanent_dtcs", "{}")).content
+                val readiness = executor.execute(ToolCall("l4", "read_readiness", "{}")).content
+                appendChat(ChatMessage(ChatRole.ASSISTANT, buildLocalReport(active, pending, permanent, readiness, _ui.value.metrics)))
             } catch (ex: Exception) {
                 appendChat(ChatMessage(ChatRole.SYSTEM, "Ошибка локальной диагностики: ${ex.message}"))
             } finally {
@@ -562,10 +568,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun buildLocalReport(active: String, pending: String, metrics: Map<ObdPid, Double>): String {
+    private fun buildLocalReport(
+        active: String,
+        pending: String,
+        permanent: String,
+        readiness: String,
+        metrics: Map<ObdPid, Double>,
+    ): String {
         val sb = StringBuilder("**Локальная диагностика** — по бортовой базе, без ИИ\n\n")
         sb.append("**Коды неисправностей**\n").append(active).append("\n\n")
         if (!pending.contains("не обнаружены")) sb.append(pending).append("\n\n")
+        // Постоянные коды показываем только если они реально есть (не стёрты сбросом).
+        if (!permanent.contains("не обнаружены") && !permanent.contains("NO DATA") &&
+            !permanent.contains("НЕТ СВЯЗИ")) {
+            sb.append(permanent).append("\n\n")
+        }
+        // Готовность мониторов — важна перед ТО и после сброса кодов.
+        if (readiness.startsWith("Готовность")) sb.append(readiness).append("\n\n")
 
         val abnormal = metrics.filter { (pid, v) ->
             (pid.critHigh != null && v >= pid.critHigh) || (pid.warnHigh != null && v >= pid.warnHigh) ||
@@ -782,8 +801,43 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Читает VIN прямо с ЭБУ (Mode 09 PID 02) и, если удалось, сразу декодирует его,
+     * заполняя форму добавления машины. Опрос приборов на это время приостанавливаем:
+     * ELM327 half-duplex, параллельные обращения смешивают кадры.
+     */
+    fun readVinFromEcu() {
+        val adapter = elm
+        if (adapter == null) {
+            _ui.update { it.copy(vinError = "Адаптер не подключён — подключитесь на вкладке «Приборы».") }
+            return
+        }
+        if (_ui.value.vinScanning || _ui.value.diagnosing) return
+        _ui.update { it.copy(vinScanning = true, vinError = null, ecuVin = null) }
+        val wasPolling = pollJob?.isActive == true
+        stopPolling()
+        viewModelScope.launch {
+            try {
+                val raw = withContext(Dispatchers.IO) { adapter.command("0902") }
+                val vin = ObdParser.parseVin(raw, adapter.headerHexLen())
+                if (vin != null) {
+                    _ui.update { it.copy(vinScanning = false, ecuVin = vin) }
+                    decodeVin(vin) // сразу распознаём марку/модель/год
+                } else {
+                    _ui.update {
+                        it.copy(vinScanning = false, vinError = "ЭБУ не вернул VIN (ответ: ${raw.trim().take(40)}). Введите вручную.")
+                    }
+                }
+            } catch (ex: Exception) {
+                _ui.update { it.copy(vinScanning = false, vinError = "Ошибка чтения VIN: ${ex.message}") }
+            } finally {
+                if (wasPolling && elm != null) startPolling()
+            }
+        }
+    }
+
     fun clearVin() {
-        _ui.update { it.copy(vinResult = null, vinError = null, vinDecoding = false) }
+        _ui.update { it.copy(vinResult = null, vinError = null, vinDecoding = false, ecuVin = null) }
     }
 
     fun clearSuggestions() {

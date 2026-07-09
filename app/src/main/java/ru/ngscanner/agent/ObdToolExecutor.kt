@@ -65,13 +65,19 @@ class ObdToolExecutor(
         "get_connection_status" ->
             "Соединение активно. Протокол: ${elm.command("ATDP").ifBlank { "неизвестен" }}"
         "read_vehicle_info" -> {
-            val raw = elm.command("0902")
-            ObdParser.parseVin(raw, elm.headerHexLen())?.let { "VIN автомобиля: $it" }
-                ?: "Не удалось прочитать VIN (ответ адаптера: ${raw.trim()})."
+            val vinRaw = elm.command("0902")
+            val vin = ObdParser.parseVin(vinRaw, elm.headerHexLen())
+            val cals = ObdParser.parseCalibrationIds(elm.command("0904"), elm.headerHexLen())
+            buildString {
+                append(vin?.let { "VIN автомобиля: $it" } ?: "Не удалось прочитать VIN (ответ адаптера: ${vinRaw.trim()}).")
+                if (cals.isNotEmpty()) append("\nКалибровки ЭБУ (прошивки): ${cals.joinToString(", ")}")
+            }
         }
         "list_supported_pids" -> "Поддерживаемые PID (0100): ${elm.command("0100")}"
         "read_dtcs" -> formatDtcs("Активные коды неисправностей", elm.command("03"), elm.isCan(), elm.headerHexLen())
         "read_pending_dtcs" -> formatDtcs("Неподтверждённые коды", elm.command("07"), elm.isCan(), elm.headerHexLen())
+        "read_permanent_dtcs" -> formatDtcs("Постоянные коды (не стираются сбросом)", elm.command("0A"), elm.isCan(), elm.headerHexLen())
+        "read_readiness" -> readReadiness(elm)
         "read_freeze_frame" -> readFreezeFrame(elm)
         "read_live_data" -> readLiveData(elm, call.argumentsJson)
         "monitor_pid" -> monitorPid(elm, call.argumentsJson)
@@ -116,6 +122,26 @@ class ObdToolExecutor(
         val sb = StringBuilder()
         for (name in pids) {
             sb.append(name).append(": ").append(readNamedPid(elm, name) ?: "нет данных").append('\n')
+        }
+        return sb.toString().trimEnd()
+    }
+
+    /** Готовность бортовых мониторов (Mode 01 PID 01) — статус MIL и самотестов систем. */
+    private suspend fun readReadiness(elm: Elm327): String {
+        val r = ObdParser.parseReadiness(elm.command("0101"), elm.headerHexLen())
+            ?: return "Готовность мониторов: ЭБУ не вернул статус (Mode 01 PID 01 не поддержан или нет связи)."
+        val sb = StringBuilder("Готовность мониторов (Mode 01 PID 01):\n")
+        sb.append("• Check Engine (MIL): ${if (r.milOn) "ГОРИТ" else "не горит"}\n")
+        sb.append("• Подтверждённых кодов: ${r.dtcCount}\n")
+        sb.append("• Двигатель: ${if (r.compression) "дизель" else "бензин"}\n")
+        if (r.monitors.isEmpty()) {
+            sb.append("Поддерживаемые мониторы не обнаружены.")
+        } else {
+            val ready = r.monitors.count { it.ready }
+            sb.append("Мониторы ($ready из ${r.monitors.size} готовы):\n")
+            for (m in r.monitors) {
+                sb.append(if (m.ready) "  ✓ ${m.name}\n" else "  ✗ ${m.name} — не завершён\n")
+            }
         }
         return sb.toString().trimEnd()
     }

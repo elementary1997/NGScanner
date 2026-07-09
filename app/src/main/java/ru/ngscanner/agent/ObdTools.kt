@@ -38,6 +38,20 @@ object ObdTools {
             parametersJsonSchema = NO_ARGS,
         ),
         ToolSpec(
+            name = "read_permanent_dtcs",
+            description = "Постоянные (permanent) коды неисправностей (Mode 0A) — их нельзя стереть " +
+                "сбросом, пока ЭБУ сам не убедится в устранении. Показывают, что реально не починено.",
+            parametersJsonSchema = NO_ARGS,
+        ),
+        ToolSpec(
+            name = "read_readiness",
+            description = "Готовность бортовых мониторов (Mode 01 PID 01): статус Check Engine и " +
+                "какие системы (катализатор, EVAP, датчики O₂, EGR…) прошли самопроверку. Нужно " +
+                "перед техосмотром и после сброса кодов — незавершённые мониторы означают, что " +
+                "авто нужно проехать цикл готовности.",
+            parametersJsonSchema = NO_ARGS,
+        ),
+        ToolSpec(
             name = "read_freeze_frame",
             description = "Снимок параметров в момент возникновения кода неисправности (Mode 02).",
             parametersJsonSchema = NO_ARGS,

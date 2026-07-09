@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import ru.ngscanner.ui.ConnectionState
 import ru.ngscanner.ui.UiState
 import ru.ngscanner.ui.MainViewModel
 
@@ -161,6 +162,7 @@ internal fun GarageTab(ui: UiState, vm: MainViewModel) {
         is GarageNav.AddVin -> AddByVinScreen(
             ui = ui,
             onDecode = { vm.decodeVin(it) },
+            onScanVin = { vm.readVinFromEcu() },
             onBack = { vm.clearVin(); nav = GarageNav.List },
             onSave = { car -> vm.addCar(car); nav = GarageNav.Detail(car.id) },
         )
@@ -658,6 +660,7 @@ private fun AddCarForm(suggestion: VehicleSuggestion, onBack: () -> Unit, onSave
 private fun AddByVinScreen(
     ui: UiState,
     onDecode: (String) -> Unit,
+    onScanVin: () -> Unit,
     onBack: () -> Unit,
     onSave: (Car) -> Unit,
 ) {
@@ -665,6 +668,9 @@ private fun AddByVinScreen(
     var vin by rememberSaveable { mutableStateOf("") }
     var mileage by rememberSaveable { mutableStateOf("") }
     val info = ui.vinResult
+    val connected = ui.connection == ConnectionState.Connected
+    // VIN, считанный с ЭБУ, подставляем в поле ввода (декодирование запускается само).
+    LaunchedEffect(ui.ecuVin) { ui.ecuVin?.let { vin = it } }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
@@ -672,11 +678,27 @@ private fun AddByVinScreen(
     ) {
         GarageTopBar("Добавить по VIN", onBack)
         Text(
-            "Введите VIN — определим марку, модель, год и двигатель автоматически. VIN " +
+            "Введите VIN вручную или считайте его прямо с авто по OBD (нужен подключённый " +
+                "адаптер). Определим марку, модель, год и двигатель автоматически. VIN " +
                 "отправляется в сервис NHTSA (США); для авто рынка РФ марка определится офлайн.",
             style = MaterialTheme.typography.bodyMedium,
             color = cs.onSurfaceVariant,
         )
+        // Чтение VIN с ЭБУ — быстрый путь без ручного ввода 17 символов.
+        OutlinedButton(
+            onClick = onScanVin,
+            enabled = connected && !ui.vinScanning && !ui.vinDecoding,
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            if (ui.vinScanning) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Rounded.DirectionsCar, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (connected) "Считать VIN с авто" else "Считать с авто (нет адаптера)")
+            }
+        }
         OutlinedTextField(
             value = vin,
             onValueChange = { vin = it.uppercase().filter { c -> c.isLetterOrDigit() }.take(17) },
