@@ -743,6 +743,13 @@ private fun AddByVinScreen(
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 shape = RoundedCornerShape(14.dp),
+                // Для офлайн-распознанных VIN (марка по WMI, без сервиса) год по
+                // 10-й позиции неоднозначен — предупреждаем, что он ориентировочный.
+                supportingText = if (info.model.isBlank()) {
+                    { Text("Определён ориентировочно по VIN — проверьте") }
+                } else {
+                    null
+                },
             )
             OutlinedTextField(
                 value = engine,

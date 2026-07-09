@@ -37,7 +37,11 @@ data class VehicleModel(
 /**
  * Плоская подсказка для выпадающего списка: одна строка = марка + модель
  * (+ поколение и, при выборе, конкретный двигатель).
+ *
+ * `@Serializable` нужен для сохранения стека навигации Гаража (GarageNavSaver):
+ * без него сериализация подсказки на экране добавления авто падала бы.
  */
+@Serializable
 data class VehicleSuggestion(
     val make: String,
     val model: String,

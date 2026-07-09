@@ -43,16 +43,19 @@ class AppSettings(context: Context) {
     var provider: ProviderId
         get() = runCatching { ProviderId.valueOf(prefs.getString(KEY_PROVIDER, "").orEmpty()) }
             .getOrDefault(ProviderId.CLAUDE)
-        set(value) = prefs.edit().putString(KEY_PROVIDER, value.name).apply()
+        set(value) { runCatching { prefs.edit().putString(KEY_PROVIDER, value.name).apply() } }
 
+    // EncryptedSharedPreferences расшифровывает лениво прямо в getString — при
+    // повреждённом keystore это бросает исключение, поэтому чтение обёрнуто.
     var model: String
-        get() = prefs.getString(KEY_MODEL, DEFAULT_MODEL) ?: DEFAULT_MODEL
-        set(value) = prefs.edit().putString(KEY_MODEL, value).apply()
+        get() = runCatching { prefs.getString(KEY_MODEL, DEFAULT_MODEL) }.getOrNull() ?: DEFAULT_MODEL
+        set(value) { runCatching { prefs.edit().putString(KEY_MODEL, value).apply() } }
 
-    fun apiKey(p: ProviderId): String = prefs.getString(keyFor(p), "").orEmpty()
+    fun apiKey(p: ProviderId): String =
+        runCatching { prefs.getString(keyFor(p), "") }.getOrNull().orEmpty()
 
     fun setApiKey(p: ProviderId, key: String) {
-        prefs.edit().putString(keyFor(p), key).apply()
+        runCatching { prefs.edit().putString(keyFor(p), key).apply() }
     }
 
     private fun keyFor(p: ProviderId) = "api_key_${p.name}"
@@ -85,9 +88,15 @@ class AppSettings(context: Context) {
         if (encEmpty) {
             val editor = enc.edit()
             legacy.all.forEach { (k, v) -> if (v is String) editor.putString(k, v) }
-            editor.apply()
+            // Синхронный commit(): plaintext чистим только при подтверждённом успехе,
+            // иначе убийство процесса между двумя async-коммитами потеряло бы ключ.
+            if (runCatching { editor.commit() }.getOrDefault(false)) {
+                legacy.edit().clear().apply()
+            }
+        } else {
+            // Новое хранилище уже заполнено — устаревший plaintext можно очистить.
+            legacy.edit().clear().apply()
         }
-        legacy.edit().clear().apply()
     }
 
     companion object {

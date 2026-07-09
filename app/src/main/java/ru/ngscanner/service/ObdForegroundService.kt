@@ -35,7 +35,9 @@ class ObdForegroundService : Service() {
             0
         }
         ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(name), type)
-        return START_STICKY
+        // Не sticky: соединение с адаптером живёт в ViewModel и при рестарте процесса
+        // не восстанавливается. Sticky-перезапуск показал бы ложное «подключено».
+        return START_NOT_STICKY
     }
 
     private fun buildNotification(name: String?): Notification {

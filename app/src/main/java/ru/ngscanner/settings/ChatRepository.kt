@@ -72,7 +72,9 @@ class ChatRepository(context: Context) {
         if (chat.isEmpty()) return sessions()
         val title = chat.firstOrNull { it.role == ChatRole.USER }?.text?.trim()
             ?.take(48)?.ifBlank { null } ?: "Сессия"
-        val session = ChatSession(id, dateIso, title, chat, slim(history))
+        // Ограничиваем размер архивируемого диалога, иначе пять сессий могут
+        // накопить большой блоб, разбираемый на старте.
+        val session = ChatSession(id, dateIso, title, chat.takeLast(MAX_CHAT), slim(history))
         val updated = (listOf(session) + loadSessions()).take(MAX_SESSIONS)
         prefs.edit().putString(KEY_SESSIONS, json.encodeToString(updated)).apply()
         return updated.map { SessionSummary(it.id, it.title, it.dateIso, it.chat.count { m -> m.role != ChatRole.TOOL }) }
@@ -87,7 +89,17 @@ class ChatRepository(context: Context) {
         return updated.map { SessionSummary(it.id, it.title, it.dateIso, it.chat.count { m -> m.role != ChatRole.TOOL }) }
     }
 
-    private fun loadSessions(): List<ChatSession> = decode(KEY_SESSIONS)
+    private fun loadSessions(): List<ChatSession> {
+        val raw = prefs.getString(KEY_SESSIONS, null) ?: return emptyList()
+        return runCatching { json.decodeFromString<List<ChatSession>>(raw) }.getOrElse {
+            // Повреждение/несовместимая схема — сохраняем сырой JSON, чтобы следующая
+            // запись архива его не затёрла (как для гаража, ради консистентности).
+            if (prefs.getString(KEY_SESSIONS_BACKUP, null) == null) {
+                prefs.edit().putString(KEY_SESSIONS_BACKUP, raw).apply()
+            }
+            emptyList()
+        }
+    }
 
     private fun slim(history: List<LlmMessage>): List<LlmMessage> = history.map { it.copy(images = emptyList()) }
 
@@ -101,6 +113,7 @@ class ChatRepository(context: Context) {
         const val KEY_CHAT = "chat"
         const val KEY_HISTORY = "history"
         const val KEY_SESSIONS = "sessions"
+        const val KEY_SESSIONS_BACKUP = "sessions_backup_raw"
         const val MAX_SESSIONS = 5
         const val MAX_CHAT = 300
     }

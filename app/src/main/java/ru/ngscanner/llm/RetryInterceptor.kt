@@ -3,6 +3,8 @@ package ru.ngscanner.llm
 import okhttp3.Interceptor
 import okhttp3.Response
 import java.io.IOException
+import java.net.ConnectException
+import java.net.UnknownHostException
 
 /**
  * Повторяет запрос при временных ошибках (429/408/5xx, включая Anthropic 529
@@ -21,8 +23,14 @@ class RetryInterceptor(private val maxRetries: Int = 3) : Interceptor {
             val response = try {
                 chain.proceed(chain.request())
             } catch (e: IOException) {
-                // Транзиентный сетевой сбой: ретраим, пока есть попытки и вызов не отменён.
-                if (attempt >= maxRetries || chain.call().isCanceled()) throw e
+                // Сетевой сбой. Повтор POST опасен: если обрыв случился в фазе чтения
+                // тела, сервер мог уже сгенерировать (и списать) ответ — повтор дал бы
+                // второй completion и двойное списание. Поэтому IOException ретраим
+                // только для идемпотентного GET или заведомо до-серверных сбоев
+                // (соединение не установилось — ответа физически быть не могло).
+                val safeToRetry = chain.request().method == "GET" ||
+                    e is ConnectException || e is UnknownHostException
+                if (attempt >= maxRetries || chain.call().isCanceled() || !safeToRetry) throw e
                 sleepBackoff(chain, BASE_DELAY_MS shl attempt)
                 attempt++
                 continue

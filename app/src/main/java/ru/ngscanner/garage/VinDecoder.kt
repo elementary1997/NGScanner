@@ -107,19 +107,23 @@ object VinDecoder {
     /**
      * Год модели по 10-й позиции VIN (резерв, если сервис не вернул ModelYear).
      *
-     * Код 10-й позиции повторяется каждые 30 лет (A = 1980 и 2010, 1 = 2001 и
-     * 2031). Циклы различаем по 7-й позиции: у легковых цифра → 1980–2009,
-     * буква → 2010–2039. Без этого буквы завышают год на 30 лет (W → 2028
-     * вместо 1998 для типичного X-VIN из РФ/СНГ).
+     * Код повторяется каждые 30 лет (A = 1980 и 2010, 1 = 2001 и 2031). Раньше
+     * цикл различали по 7-й позиции, но это US/NHTSA-конвенция — АвтоВАЗ и
+     * китайские марки (целевой офлайн-рынок) её не соблюдают, из-за чего год
+     * систематически занижался на 30 лет. Вместо этого выбираем более свежий
+     * цикл, если он не в будущем (частый случай на диагностике), иначе
+     * откатываемся на предыдущий. Год ориентировочный — в форме он редактируем.
      */
-    private fun yearFromVin(vin: String): Int? {
+    internal fun yearFromVin(vin: String, currentYear: Int = java.time.Year.now().value): Int? {
         if (vin.length < 10) return null
         val code = vin[9]
-        val secondCycle = vin.length > 6 && vin[6].isLetter()
         val letters = "ABCDEFGHJKLMNPRSTVWXY" // без I,O,Q,U,Z
-        letters.indexOf(code).takeIf { it >= 0 }?.let { return (if (secondCycle) 2010 else 1980) + it }
-        "123456789".indexOf(code).takeIf { it >= 0 }?.let { return (if (secondCycle) 2031 else 2001) + it }
-        return null
+        // Базовый цикл 1980–2009: 21 буква (1980..2000) + цифры 1..9 (2001..2009).
+        val base = letters.indexOf(code).takeIf { it >= 0 }?.let { 1980 + it }
+            ?: "123456789".indexOf(code).takeIf { it >= 0 }?.let { 2001 + it }
+            ?: return null
+        val newer = base + 30
+        return if (newer <= currentYear + 1) newer else base
     }
 
     /** «CHEVROLET» → «Chevrolet», «LAND ROVER» → «Land Rover». */
