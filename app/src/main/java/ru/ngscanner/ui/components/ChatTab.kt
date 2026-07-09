@@ -4,6 +4,7 @@ package ru.ngscanner.ui.components
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.BorderStroke
@@ -148,8 +149,14 @@ internal fun ChatTab(
                     Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(12.dp))
-                        Text("Диагностирую…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.weight(1f))
+                        // Текущий шаг агента сменяется плавно на месте, а не строками в чате.
+                        Crossfade(
+                            targetState = ui.agentStatus ?: "Диагностирую…",
+                            modifier = Modifier.weight(1f),
+                            label = "agentStatus",
+                        ) { status ->
+                            Text(status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         TextButton(onClick = onCancel) { Text("Прервать") }
                     }
                 }

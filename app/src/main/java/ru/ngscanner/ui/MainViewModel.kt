@@ -121,6 +121,9 @@ data class UiState(
     // диагностика / чат с LLM
     val chat: List<ChatMessage> = emptyList(),
     val diagnosing: Boolean = false,
+    // текущий шаг агента (Проверяю соединение / Читаю коды…) — сменяется на месте,
+    // а не копится строками в чате; null → показываем общий «Диагностирую…»
+    val agentStatus: String? = null,
     // прикреплённое к вводу фото (в ViewModel — переживает поворот экрана)
     val pendingImage: LlmImage? = null,
     // архив последних сессий диагностики (для восстановления)
@@ -649,7 +652,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         val shown = if (images.isEmpty()) text else "📷 " + text.ifBlank { "(фото)" }
         appendChat(ChatMessage(ChatRole.USER, shown))
-        _ui.update { it.copy(diagnosing = true, pendingImage = null) }
+        _ui.update { it.copy(diagnosing = true, pendingImage = null, agentStatus = null) }
 
         // Фиксируем провайдера и модель запроса: пока идёт диалог, их смена в UI
         // заблокирована, но расход всё равно пишем на ту модель, что дала ответ.
@@ -671,8 +674,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 llmHistory = trimLlmHistory(agent.run(text, images, llmHistory, carContext(), adapterConnected = elm != null) { event ->
                     when (event) {
-                        is AgentEvent.Assistant -> appendChat(ChatMessage(ChatRole.ASSISTANT, event.text))
-                        is AgentEvent.ToolCall -> appendChat(ChatMessage(ChatRole.TOOL, toolStatusText(event.name)))
+                        // Ответ модели остаётся в истории; сбрасываем статус — дальше она «думает».
+                        is AgentEvent.Assistant -> {
+                            appendChat(ChatMessage(ChatRole.ASSISTANT, event.text))
+                            _ui.update { it.copy(agentStatus = null) }
+                        }
+                        // Шаг инструмента — не строка в чате, а сменяющийся статус под спиннером.
+                        is AgentEvent.ToolCall -> _ui.update { it.copy(agentStatus = toolStatusText(event.name)) }
                         is AgentEvent.Usage -> recordUsage(reqProvider, reqModel, event.prompt, event.completion)
                     }
                 })
@@ -684,7 +692,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 clearConfirm?.complete(false)
                 clearConfirm = null
-                _ui.update { it.copy(diagnosing = false, clearDtcsPending = false) }
+                _ui.update { it.copy(diagnosing = false, clearDtcsPending = false, agentStatus = null) }
                 chatRepo.save(_ui.value.chat, llmHistory)
                 if (wasPolling && elm != null) startPolling()
             }
