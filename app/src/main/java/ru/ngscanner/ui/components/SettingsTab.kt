@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.rounded.DataUsage
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
@@ -181,25 +180,78 @@ internal fun SettingsTab(
             }
         }
 
-        UsageCard(ui, providerLabel, onReset = vm::resetUsage)
+        CollapsibleCard(
+            title = "Расход · $providerLabel",
+            summary = "всего ${formatTokens(ui.totalTokens)}",
+            initiallyExpanded = false,
+        ) {
+            UsageContent(ui, onReset = vm::resetUsage)
+        }
 
-        InfoCard(
-            Icons.Rounded.ErrorOutline,
-            if (ui.keysEncrypted) {
-                "Ключ хранится в зашифрованном виде только на устройстве. " +
-                    "Claude — console.anthropic.com; Cloud.ru — личный кабинет (сервисный аккаунт)."
-            } else {
-                "⚠️ Шифрованное хранилище недоступно на этом устройстве — ключ хранится без " +
-                    "шифрования в приватных данных приложения. Будьте осторожны на устройствах с root."
-            },
-        )
-        InfoCard(
-            Icons.Rounded.Info,
-            "Вердикт LLM носит рекомендательный характер и не заменяет осмотр мастером. " +
-                "Тексты диалога передаются провайдеру модели, а VIN при распознавании — сервису " +
-                "NHTSA (США): это трансграничная передача данных. Не вводите персональные данные.",
-        )
+        CollapsibleCard(
+            title = "Приватность и хранение",
+            summary = if (ui.keysEncrypted) "ключ зашифрован · данные" else "⚠️ ключ без шифрования",
+            initiallyExpanded = false,
+        ) {
+            InfoContent(ui)
+        }
     }
+}
+
+/** Содержимое сворачиваемой секции «Расход» (без внешней карточки — её даёт CollapsibleCard). */
+@Composable
+private fun UsageContent(ui: UiState, onReset: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val uriHandler = LocalUriHandler.current
+    val (billingUrl, billingLabel) = if (ui.provider == ProviderId.CLOUD_RU) {
+        "https://console.cloud.ru" to "Кабинет Cloud.ru"
+    } else {
+        "https://console.anthropic.com/settings/billing" to "Биллинг Anthropic"
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+        UsageStat("За сессию", formatTokens(ui.sessionTokens.toLong()))
+        UsageStat("Всего", formatTokens(ui.totalTokens))
+    }
+    Text(
+        "API отдаёт расход в токенах, а не деньги — остаток средств смотрите в личном кабинете провайдера.",
+        style = MaterialTheme.typography.bodySmall,
+        color = cs.onSurfaceVariant,
+    )
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(
+            onClick = { uriHandler.openUri(billingUrl) },
+            modifier = Modifier.weight(1f).height(48.dp),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Icon(Icons.Rounded.OpenInNew, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(billingLabel, maxLines = 1)
+        }
+        if (ui.totalTokens > 0) {
+            TextButton(onClick = onReset) { Text("Сбросить") }
+        }
+    }
+}
+
+/** Содержимое сворачиваемой секции «Приватность и хранение». */
+@Composable
+private fun InfoContent(ui: UiState) {
+    InfoCard(
+        Icons.Rounded.ErrorOutline,
+        if (ui.keysEncrypted) {
+            "Ключ хранится в зашифрованном виде только на устройстве. " +
+                "Claude — console.anthropic.com; Cloud.ru — личный кабинет (сервисный аккаунт)."
+        } else {
+            "⚠️ Шифрованное хранилище недоступно на этом устройстве — ключ хранится без " +
+                "шифрования в приватных данных приложения. Будьте осторожны на устройствах с root."
+        },
+    )
+    InfoCard(
+        Icons.Rounded.Info,
+        "Вердикт LLM носит рекомендательный характер и не заменяет осмотр мастером. " +
+            "Тексты диалога передаются провайдеру модели, а VIN при распознавании — сервису " +
+            "NHTSA (США): это трансграничная передача данных. Не вводите персональные данные.",
+    )
 }
 
 /**
@@ -247,55 +299,6 @@ private fun CollapsibleCard(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 content = content,
             )
-        }
-    }
-}
-
-/**
- * Расход токенов по провайдеру. API отдаёт только потребление токенов (поле usage),
- * а не денежный баланс — остаток средств пользователь смотрит в личном кабинете, на
- * который ведёт кнопка.
- */
-@Composable
-private fun UsageCard(ui: UiState, providerLabel: String, onReset: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    val uriHandler = LocalUriHandler.current
-    val (billingUrl, billingLabel) = if (ui.provider == ProviderId.CLOUD_RU) {
-        "https://console.cloud.ru" to "Кабинет Cloud.ru"
-    } else {
-        "https://console.anthropic.com/settings/billing" to "Биллинг Anthropic"
-    }
-    ElevatedCard(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.DataUsage, null, tint = cs.primary)
-                Spacer(Modifier.width(10.dp))
-                Text("Расход · $providerLabel", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-                UsageStat("За сессию", formatTokens(ui.sessionTokens.toLong()))
-                UsageStat("Всего", formatTokens(ui.totalTokens))
-            }
-            Text(
-                "API отдаёт расход в токенах, а не деньги — остаток средств смотрите в личном " +
-                    "кабинете провайдера.",
-                style = MaterialTheme.typography.bodySmall,
-                color = cs.onSurfaceVariant,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = { uriHandler.openUri(billingUrl) },
-                    modifier = Modifier.weight(1f).height(48.dp),
-                    shape = RoundedCornerShape(14.dp),
-                ) {
-                    Icon(Icons.Rounded.OpenInNew, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(billingLabel, maxLines = 1)
-                }
-                if (ui.totalTokens > 0) {
-                    TextButton(onClick = onReset) { Text("Сбросить") }
-                }
-            }
         }
     }
 }
