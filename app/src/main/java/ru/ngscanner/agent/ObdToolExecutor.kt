@@ -1,5 +1,6 @@
 package ru.ngscanner.agent
 
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -68,7 +69,7 @@ class ObdToolExecutor(
         "list_supported_pids" -> "Поддерживаемые PID (0100): ${elm.command("0100")}"
         "read_dtcs" -> formatDtcs("Активные коды неисправностей", elm.command("03"))
         "read_pending_dtcs" -> formatDtcs("Неподтверждённые коды", elm.command("07"))
-        "read_freeze_frame" -> "Freeze frame (0202): ${elm.command("0202")}"
+        "read_freeze_frame" -> readFreezeFrame(elm)
         "read_live_data" -> readLiveData(elm, call.argumentsJson)
         "monitor_pid" -> monitorPid(elm, call.argumentsJson)
         "clear_dtcs" ->
@@ -116,11 +117,49 @@ class ObdToolExecutor(
         return sb.toString().trimEnd()
     }
 
+    /** Снимок параметров в момент фиксации кода (Mode 02, заголовок ответа «42»). */
+    private suspend fun readFreezeFrame(elm: Elm327): String {
+        val pids = listOf(
+            ObdPid.RPM, ObdPid.COOLANT, ObdPid.SPEED, ObdPid.ENGINE_LOAD,
+            ObdPid.THROTTLE, ObdPid.STFT, ObdPid.MAF,
+        )
+        val sb = StringBuilder()
+        for (p in pids) {
+            val suffix = p.cmd.removePrefix("01")
+            val data = ObdParser.freezeFrameBytes(elm.command("02$suffix"), suffix)
+            val value = data?.let { runCatching { p.decode(it) }.getOrNull() }
+            if (value != null) sb.append("• ${p.label}: ${formatValue(value)} ${p.unit}\n")
+        }
+        return if (sb.isEmpty()) {
+            "Freeze frame недоступен: нет сохранённого снимка (или активных кодов)."
+        } else {
+            "Параметры в момент фиксации кода (freeze frame):\n${sb.toString().trimEnd()}"
+        }
+    }
+
+    /** Записывает серию значений одного PID за N секунд и возвращает min/max/avg и разброс. */
     private suspend fun monitorPid(elm: Elm327, argsJson: String): String {
-        val pid = runCatching {
-            json.parseToJsonElement(argsJson).jsonObject["pid"]?.jsonPrimitive?.content
-        }.getOrNull() ?: return "Не указан PID."
-        return "$pid: ${readNamedPid(elm, pid) ?: "нет данных"} (запись серии значений — в разработке)"
+        val obj = runCatching { json.parseToJsonElement(argsJson).jsonObject }.getOrNull()
+        val pidName = obj?.get("pid")?.jsonPrimitive?.content ?: return "Не указан PID."
+        val duration = obj["duration_sec"]?.jsonPrimitive?.content?.toIntOrNull()?.coerceIn(1, 60) ?: 5
+        val pid = matchPid(pidName) ?: return "Неизвестный PID: $pidName"
+
+        val samples = mutableListOf<Double>()
+        val iterations = (duration * 1000 / SAMPLE_INTERVAL_MS).toInt().coerceIn(3, 120)
+        repeat(iterations) {
+            elm.read(pid)?.let { samples.add(it) }
+            delay(SAMPLE_INTERVAL_MS)
+        }
+        if (samples.isEmpty()) return "$pidName: нет данных за ${duration} с."
+
+        val min = samples.min()
+        val max = samples.max()
+        val avg = samples.average()
+        val swing = max - min
+        val threshold = if (pid == ObdPid.RPM) 150.0 else maxOf(2.0, kotlin.math.abs(avg) * 0.1)
+        val note = if (swing > threshold) " — заметное плавание/нестабильность" else " — стабильно"
+        return "$pidName за ${duration} с (${samples.size} замеров): среднее ${formatValue(avg)}, " +
+            "мин ${formatValue(min)}, макс ${formatValue(max)}, разброс ${formatValue(swing)} ${pid.unit}$note"
     }
 
     private suspend fun readNamedPid(elm: Elm327, name: String): String? {
@@ -142,4 +181,8 @@ class ObdToolExecutor(
 
     private fun formatValue(v: Double): String =
         if (v == v.toLong().toDouble()) v.toLong().toString() else "%.1f".format(v)
+
+    private companion object {
+        const val SAMPLE_INTERVAL_MS = 400L
+    }
 }

@@ -150,6 +150,20 @@ object ObdParser {
         return dataHex.chunked(2).filter { it.length == 2 }.map { it.toInt(16) }.toIntArray()
     }
 
+    /**
+     * Байты данных из ответа Mode 02 (freeze frame) — заголовок «42» + суффикс PID.
+     * Например для 020C ищем «420C» и возвращаем байты замороженного значения.
+     */
+    fun freezeFrameBytes(raw: String, pidSuffix: String): IntArray? {
+        val hex = normalize(raw)
+        val prefix = "42" + pidSuffix.uppercase()
+        val idx = hex.indexOf(prefix)
+        if (idx < 0) return null
+        val dataHex = hex.substring(idx + prefix.length)
+        if (dataHex.length < 2) return null
+        return dataHex.chunked(2).filter { it.length == 2 }.map { it.toInt(16) }.toIntArray()
+    }
+
     private fun normalize(raw: String): String =
         raw.uppercase().replace(Regex("[^0-9A-F]"), "")
 }

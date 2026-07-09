@@ -40,4 +40,19 @@ class ObdToolExecutorTest {
         val result = executor(elm, allow = false).execute(ToolCall("4", "read_dtcs", "{}"))
         assertTrue(result.content.contains("P0133"))
     }
+
+    @Test
+    fun freezeFrameDecodesFrozenRpm() = runBlocking {
+        val elm = Elm327(FakeObdTransport(mapOf("020C" to "42 0C 1A F8")))
+        val result = executor(elm, allow = false).execute(ToolCall("5", "read_freeze_frame", "{}"))
+        assertTrue(result.content.contains("Обороты"))
+    }
+
+    @Test
+    fun monitorPidReturnsStats() = runBlocking {
+        val elm = Elm327(FakeObdTransport(mapOf("010C" to "41 0C 1A F8")))
+        val result = executor(elm, allow = false)
+            .execute(ToolCall("6", "monitor_pid", """{"pid":"RPM","duration_sec":1}"""))
+        assertTrue(result.content.contains("среднее"))
+    }
 }
