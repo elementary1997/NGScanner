@@ -16,7 +16,19 @@ import ru.ngscanner.agent.AgentEvent
 import ru.ngscanner.agent.DiagnosticAgent
 import ru.ngscanner.agent.ObdToolExecutor
 import ru.ngscanner.bluetooth.BluetoothController
+import ru.ngscanner.garage.Car
+import ru.ngscanner.garage.Garage
+import ru.ngscanner.garage.GarageRepository
+import ru.ngscanner.garage.LogEntry
+import ru.ngscanner.garage.ModelNormsRepository
+import ru.ngscanner.garage.VehicleCatalog
+import ru.ngscanner.garage.VehicleSuggestion
+import ru.ngscanner.garage.VinDecoder
+import ru.ngscanner.garage.VinInfo
 import ru.ngscanner.llm.ClaudeProvider
+import ru.ngscanner.llm.LlmRequest
+import ru.ngscanner.llm.LlmResponse
+import ru.ngscanner.llm.Role
 import ru.ngscanner.llm.CloudRuProvider
 import ru.ngscanner.llm.LlmImage
 import ru.ngscanner.llm.LlmMessage
@@ -45,6 +57,8 @@ data class UiState(
     // подключение к адаптеру
     val btEnabled: Boolean = false,
     val devices: List<DeviceUi> = emptyList(),
+    val discovered: List<DeviceUi> = emptyList(),
+    val scanning: Boolean = false,
     val connection: ConnectionState = ConnectionState.Disconnected,
     val connectedName: String? = null,
     val metrics: Map<ObdPid, Double> = emptyMap(),
@@ -60,6 +74,15 @@ data class UiState(
     val testing: Boolean = false,
     val testStatus: TestStatus? = null,
     val availableModels: List<LlmModel> = emptyList(),
+    // гараж
+    val garage: Garage = Garage(),
+    val carSuggestions: List<VehicleSuggestion> = emptyList(),
+    val vinDecoding: Boolean = false,
+    val vinResult: VinInfo? = null,
+    val vinError: String? = null,
+    // модельные нормы параметров для активной машины: pidCmd -> текст нормы
+    val modelNorms: Map<String, String> = emptyMap(),
+    val normLoadingPid: String? = null,
 )
 
 /**
@@ -70,6 +93,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val controller = BluetoothController(app)
     private val settings = AppSettings(app)
+    private val garageRepo = GarageRepository(app)
+    private val normsRepo = ModelNormsRepository(app)
 
     private var transport: ClassicSppTransport? = null
     private var elm: Elm327? = null
@@ -77,12 +102,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var llmHistory: List<LlmMessage> = emptyList()
 
     private val _ui = MutableStateFlow(
-        UiState(
-            provider = settings.provider,
-            model = settings.model,
-            hasKey = settings.apiKey(settings.provider).isNotBlank(),
-            apiKey = settings.apiKey(settings.provider),
-        ),
+        garageRepo.load().let { garage ->
+            UiState(
+                provider = settings.provider,
+                model = settings.model,
+                hasKey = settings.apiKey(settings.provider).isNotBlank(),
+                apiKey = settings.apiKey(settings.provider),
+                garage = garage,
+                modelNorms = garage.activeCar?.let { c -> normsRepo.normsFor(c.id) } ?: emptyMap(),
+            )
+        },
     )
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
@@ -101,9 +130,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     @SuppressLint("MissingPermission")
+    fun startScan() {
+        if (_ui.value.scanning) return
+        _ui.update { it.copy(discovered = emptyList(), scanning = true) }
+        controller.startDiscovery(
+            onFound = { device ->
+                val ui = DeviceUi(name = device.name ?: "Без имени", address = device.address)
+                val bonded = _ui.value.devices.map { it.address }.toSet()
+                _ui.update { s ->
+                    if (s.discovered.any { it.address == ui.address } || ui.address in bonded) {
+                        s
+                    } else {
+                        s.copy(discovered = s.discovered + ui)
+                    }
+                }
+            },
+            onFinished = { _ui.update { it.copy(scanning = false) } },
+        )
+    }
+
+    fun stopScan() {
+        controller.cancelDiscovery()
+        _ui.update { it.copy(scanning = false) }
+    }
+
+    @SuppressLint("MissingPermission")
     fun connect(address: String) {
         val device = controller.deviceByAddress(address) ?: return
-        _ui.update { it.copy(connection = ConnectionState.Connecting, error = null) }
+        controller.cancelDiscovery()
+        _ui.update { it.copy(connection = ConnectionState.Connecting, error = null, scanning = false) }
         viewModelScope.launch {
             try {
                 val t = ClassicSppTransport(device)
@@ -169,10 +224,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         appendChat(ChatMessage(ChatRole.USER, shown))
         _ui.update { it.copy(diagnosing = true) }
 
-        val agent = DiagnosticAgent(buildProvider(_ui.value.provider, key), _ui.value.model, ObdToolExecutor(elm))
+        val executor = ObdToolExecutor(elm, saveNote = { note -> addSystemLogEntry(note) })
+        val agent = DiagnosticAgent(buildProvider(_ui.value.provider, key), _ui.value.model, executor)
         viewModelScope.launch {
             try {
-                llmHistory = agent.run(text, images, llmHistory) { event ->
+                llmHistory = agent.run(text, images, llmHistory, carContext()) { event ->
                     val msg = when (event) {
                         is AgentEvent.Assistant -> ChatMessage(ChatRole.ASSISTANT, event.text)
                         is AgentEvent.ToolCall -> ChatMessage(ChatRole.TOOL, toolStatusText(event.name))
@@ -199,6 +255,162 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun buildProvider(id: ProviderId, key: String): LlmProvider = when (id) {
         ProviderId.CLAUDE -> ClaudeProvider(key)
         ProviderId.CLOUD_RU -> CloudRuProvider(key)
+    }
+
+    /** Контекст активной машины для агента: паспорт + последние записи бортжурнала. */
+    private fun carContext(): String? {
+        val car = _ui.value.garage.activeCar ?: return null
+        return buildString {
+            append("Активный автомобиль пользователя: ${car.title}")
+            car.spec.takeIf { it.isNotBlank() }?.let { append(", $it") }
+            car.mileageKm?.let { append(", пробег ${it} км") }
+            car.vin?.takeIf { it.isNotBlank() }?.let { append(", VIN $it") }
+            append(".")
+            val log = car.log.take(6)
+            if (log.isNotEmpty()) {
+                append("\nПоследние работы и наблюдения по этой машине:")
+                log.forEach { e ->
+                    val km = e.mileageKm?.let { " (${it} км)" } ?: ""
+                    val who = if (e.bySystem) " [запись ассистента]" else ""
+                    append("\n • ${e.dateIso}$km — ${e.text}$who")
+                }
+                append(
+                    "\nУчитывай это: не предлагай проверять узлы, которые владелец уже заменил, " +
+                        "первыми — ищи причину в более узком пространстве.",
+                )
+            }
+        }
+    }
+
+    // ---- Гараж ----
+
+    fun searchCars(query: String) {
+        viewModelScope.launch {
+            val suggestions = if (query.isBlank()) {
+                emptyList()
+            } else {
+                runCatching { VehicleCatalog.search(getApplication(), query, limit = 12) }.getOrDefault(emptyList())
+            }
+            _ui.update { it.copy(carSuggestions = suggestions) }
+        }
+    }
+
+    /** Сохраняет собранную в форме машину и делает её активной. */
+    fun addCar(car: Car) {
+        garageRepo.upsertCar(car)
+        val garage = garageRepo.setActive(car.id)
+        _ui.update {
+            it.copy(
+                garage = garage,
+                carSuggestions = emptyList(),
+                vinResult = null,
+                vinError = null,
+                modelNorms = normsRepo.normsFor(car.id),
+            )
+        }
+    }
+
+    /** Декодирует VIN через vPIC; результат кладёт в [UiState.vinResult]. */
+    fun decodeVin(vin: String) {
+        if (vin.isBlank() || _ui.value.vinDecoding) return
+        _ui.update { it.copy(vinDecoding = true, vinError = null, vinResult = null) }
+        viewModelScope.launch {
+            val info = runCatching { VinDecoder.decode(vin) }.getOrNull()
+            _ui.update {
+                if (info != null) {
+                    it.copy(vinDecoding = false, vinResult = info)
+                } else {
+                    it.copy(vinDecoding = false, vinError = "Не удалось распознать VIN. Проверьте номер или введите вручную.")
+                }
+            }
+        }
+    }
+
+    fun clearVin() {
+        _ui.update { it.copy(vinResult = null, vinError = null, vinDecoding = false) }
+    }
+
+    fun clearSuggestions() {
+        _ui.update { it.copy(carSuggestions = emptyList()) }
+    }
+
+    fun setActiveCar(carId: String) {
+        _ui.update { it.copy(garage = garageRepo.setActive(carId), modelNorms = normsRepo.normsFor(carId)) }
+    }
+
+    fun deleteCar(carId: String) {
+        val garage = garageRepo.deleteCar(carId)
+        _ui.update {
+            it.copy(
+                garage = garage,
+                modelNorms = garage.activeCar?.let { c -> normsRepo.normsFor(c.id) } ?: emptyMap(),
+            )
+        }
+    }
+
+    /**
+     * Узнаёт у модели норму параметра для активной машины и кэширует её.
+     * Если норма уже в кэше или запрос идёт — ничего не делает.
+     */
+    fun requestNorm(pid: ObdPid) {
+        val car = _ui.value.garage.activeCar ?: return
+        val cmd = pid.cmd
+        if (_ui.value.modelNorms.containsKey(cmd) || _ui.value.normLoadingPid == cmd) return
+        val key = settings.apiKey(_ui.value.provider)
+        if (key.isBlank()) return
+        _ui.update { it.copy(normLoadingPid = cmd) }
+        viewModelScope.launch {
+            val norm = runCatching { fetchNorm(car, pid, key) }.getOrNull()
+            if (norm != null) {
+                normsRepo.setNorm(car.id, cmd, norm)
+                _ui.update { it.copy(modelNorms = it.modelNorms + (cmd to norm), normLoadingPid = null) }
+            } else {
+                _ui.update { it.copy(normLoadingPid = null) }
+            }
+        }
+    }
+
+    private suspend fun fetchNorm(car: Car, pid: ObdPid, key: String): String? {
+        val provider = buildProvider(_ui.value.provider, key)
+        val system = "Ты — автомобильный справочник. Ответь ОДНОЙ короткой строкой: нормальный " +
+            "диапазон значения параметра для указанной машины, с единицами измерения. Без пояснений " +
+            "и вводных слов. Пример правильного ответа: 780–840 об/мин."
+        val spec = car.spec.takeIf { it.isNotBlank() }?.let { ", $it" } ?: ""
+        val userMsg = "Автомобиль: ${car.title}$spec. Параметр: ${pid.label} (${pid.unit}). " +
+            "Общая норма: ${pid.norm}. Укажи типичную норму именно для этой машины."
+        val response = provider.send(
+            LlmRequest(_ui.value.model, system, listOf(LlmMessage(Role.USER, content = userMsg)), emptyList()),
+        )
+        return when (response) {
+            is LlmResponse.Final -> response.text.trim().lineSequence().firstOrNull()?.take(80)?.ifBlank { null }
+            is LlmResponse.ToolUse -> response.text?.trim()?.take(80)?.ifBlank { null }
+        }
+    }
+
+    fun addLogEntry(text: String, mileageKm: Int?) {
+        val car = _ui.value.garage.activeCar ?: return
+        if (text.isBlank()) return
+        val entry = LogEntry(
+            id = GarageRepository.newEntryId(),
+            dateIso = java.time.LocalDate.now().toString(),
+            mileageKm = mileageKm,
+            text = text.trim(),
+        )
+        _ui.update { it.copy(garage = garageRepo.addEntry(car.id, entry)) }
+    }
+
+    /** Запись, которую агент сам сохраняет в бортжурнал (`bySystem = true`). */
+    private fun addSystemLogEntry(text: String): Boolean {
+        val car = _ui.value.garage.activeCar ?: return false
+        if (text.isBlank()) return false
+        val entry = LogEntry(
+            id = GarageRepository.newEntryId(),
+            dateIso = java.time.LocalDate.now().toString(),
+            text = text.trim(),
+            bySystem = true,
+        )
+        _ui.update { it.copy(garage = garageRepo.addEntry(car.id, entry)) }
+        return true
     }
 
     /** Человекочитаемый статус вместо технического имени инструмента. */
@@ -267,6 +479,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         stopPolling()
+        controller.cancelDiscovery()
         transport?.close()
     }
 
