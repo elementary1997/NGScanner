@@ -249,7 +249,7 @@ private fun Stat(caption: String, value: String) {
 }
 
 /** Диапазон оси значений: данные, расширенные до порогов, с небольшим запасом. */
-private fun yRangeFor(pid: ObdPid, samples: List<MetricSample>): Pair<Double, Double> {
+internal fun yRangeFor(pid: ObdPid, samples: List<MetricSample>): Pair<Double, Double> {
     var lo = samples.minOf { it.value }
     var hi = samples.maxOf { it.value }
     listOfNotNull(pid.warnLow, pid.critLow).forEach { lo = minOf(lo, it) }

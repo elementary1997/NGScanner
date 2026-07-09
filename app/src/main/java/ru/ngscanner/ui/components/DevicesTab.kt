@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -20,6 +22,8 @@ import androidx.compose.material.icons.automirrored.rounded.BluetoothSearching
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.ShowChart
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
@@ -31,8 +35,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -80,27 +86,103 @@ internal fun DevicesTab(
         )
         return
     }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Spacer(Modifier.height(8.dp))
-        StatusCard(ui.connection, ui.connectedName)
-        when (ui.connection) {
-            ConnectionState.Connected -> Dashboard(
-                metrics = ui.metrics,
-                history = ui.history,
-                onDisconnect = onDisconnect,
-                onOpenGraph = { graphName = it.name },
-            )
-            ConnectionState.Connecting -> ConnectingCard()
-            ConnectionState.Disconnected -> FavoritesQuickConnect(ui.favorites, onConnect, onOpenConnection)
+    // При активном соединении — приборы и графики на двух свайпаемых панелях; иначе
+    // (нет данных для графиков) прежний одиночный экран со статусом и избранными.
+    if (ui.connection == ConnectionState.Connected) {
+        DevicesConnected(ui, onDisconnect, onOpenGraph = { graphName = it.name })
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Spacer(Modifier.height(8.dp))
+            StatusCard(ui.connection, ui.connectedName)
+            when (ui.connection) {
+                ConnectionState.Connecting -> ConnectingCard()
+                else -> FavoritesQuickConnect(ui.favorites, onConnect, onOpenConnection)
+            }
+            ui.error?.let { ErrorCard(it) }
+            Spacer(Modifier.height(16.dp))
         }
-        ui.error?.let { ErrorCard(it) }
-        Spacer(Modifier.height(16.dp))
+    }
+}
+
+/**
+ * Подключённое состояние: статус сверху, под ним свайпаемые панели «Приборы»
+ * (дашборд без изменений) и «Графики» (обзор трендов). Пейджер занимает
+ * оставшуюся высоту (у каждой панели свой вертикальный скролл — оси не конфликтуют).
+ */
+@Composable
+private fun DevicesConnected(
+    ui: UiState,
+    onDisconnect: () -> Unit,
+    onOpenGraph: (ObdPid) -> Unit,
+) {
+    val pagerState = rememberPagerState(pageCount = { 2 })
+    val scope = rememberCoroutineScope()
+    Column(Modifier.fillMaxSize()) {
+        Spacer(Modifier.height(8.dp))
+        Column(Modifier.padding(horizontal = 16.dp)) { StatusCard(ui.connection, ui.connectedName) }
+        Spacer(Modifier.height(12.dp))
+        PanelTabs(pagerState.currentPage) { page -> scope.launch { pagerState.animateScrollToPage(page) } }
+        Spacer(Modifier.height(4.dp))
+        HorizontalPager(state = pagerState, modifier = Modifier.weight(1f).fillMaxWidth()) { page ->
+            if (page == 0) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Spacer(Modifier.height(4.dp))
+                    Dashboard(ui.metrics, ui.history, onDisconnect, onOpenGraph)
+                    ui.error?.let { ErrorCard(it) }
+                    Spacer(Modifier.height(16.dp))
+                }
+            } else {
+                GraphsPanel(ui.metrics, ui.history, onOpenGraph)
+            }
+        }
+    }
+}
+
+/** Два переключателя панелей — кликом и синхронно со свайпом пейджера. */
+@Composable
+private fun PanelTabs(current: Int, onSelect: (Int) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val tabs = listOf("Приборы" to Icons.Rounded.Speed, "Графики" to Icons.Rounded.ShowChart)
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        tabs.forEachIndexed { i, (label, icon) ->
+            val selected = i == current
+            Surface(
+                onClick = { onSelect(i) },
+                shape = RoundedCornerShape(12.dp),
+                color = if (selected) cs.primaryContainer else cs.surfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.weight(1f).height(40.dp),
+            ) {
+                Row(
+                    Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(icon, null, Modifier.size(16.dp), tint = if (selected) cs.primary else cs.onSurfaceVariant)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (selected) cs.onPrimaryContainer else cs.onSurfaceVariant,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                }
+            }
+        }
     }
 }
 
