@@ -38,4 +38,23 @@ class IsoTpTest {
     fun blankIsNull() {
         assertNull(IsoTp.reassemble("\r>"))
     }
+
+    // С заголовками (ATH1) кадры группируются по CAN-ID → отдельное сообщение на ЭБУ.
+    @Test
+    fun headeredGroupsFramesByEcu() {
+        val raw = "7E80443010113000000\r7E90443010700000000\r\r>"
+        val msgs = IsoTp.messages(raw, headerHexLen = 3)
+        assertEquals(2, msgs.size)
+        assertEquals("43010113", msgs[0]) // 7E8: SF(4б) 43 01 0113
+        assertEquals("43010700", msgs[1]) // 7E9: SF(4б) 43 01 0700
+    }
+
+    // Статус-токен в буфере не должен отключать группировку по ЭБУ.
+    @Test
+    fun headeredIgnoresStatusToken() {
+        val raw = "SEARCHING...\r7E80443010113000000\r\r>"
+        val msgs = IsoTp.messages(raw, headerHexLen = 3)
+        assertEquals(1, msgs.size)
+        assertEquals("43010113", msgs[0])
+    }
 }

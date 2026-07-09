@@ -39,15 +39,17 @@ object IsoTp {
         if (lines.isEmpty()) return emptyList()
 
         // --- Заголовки включены: группируем кадры по CAN-ID (ЭБУ), затем ISO-TP. ---
+        // Отбираем именно кадры (длина > заголовок+PCI, данные после заголовка байт-
+        // выровнены, первый байт — валидный ISO-TP PCI). Статус-токены (SEARCHING…,
+        // STOPPED) и мусор отсеиваются и не отключают группировку; если валидных
+        // кадров нет — падаем в бесзаголовочный разбор ниже.
         if (headerHexLen > 0) {
-            val hexLines = lines.map { hexOnly(it) }.filter { it.isNotEmpty() }
-            // Проверяем, что строки действительно похожи на кадры с заголовком:
-            // длина > заголовок+PCI и данные после заголовка байт-выровнены. Иначе
-            // (клон проигнорировал ATH1) — падаем в бесзаголовочный разбор ниже.
-            val headered = hexLines.isNotEmpty() && hexLines.all {
-                it.length > headerHexLen + 2 && (it.length - headerHexLen) % 2 == 0
+            val frameLines = lines.map { hexOnly(it) }.filter { line ->
+                line.length > headerHexLen + 2 &&
+                    (line.length - headerHexLen) % 2 == 0 &&
+                    (line.substring(headerHexLen, headerHexLen + 1).toIntOrNull(16) ?: 9) in 0..2
             }
-            if (headered) return messagesByHeader(hexLines, headerHexLen)
+            if (frameLines.isNotEmpty()) return messagesByHeader(frameLines, headerHexLen)
         }
 
         // --- Авто-форматирование (CAF): «NNN» (длина) + строки «i:данные». ---

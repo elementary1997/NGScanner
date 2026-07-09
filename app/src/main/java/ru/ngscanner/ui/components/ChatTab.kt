@@ -2,6 +2,7 @@
 
 package ru.ngscanner.ui.components
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -60,6 +61,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,6 +87,10 @@ internal fun ChatTab(
 ) {
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    // «Назад» из открытого диалога закрывает его к списку последних сессий (текущий
+    // диалог уходит в архив, не теряется), а не переключает вкладку. Обработчик
+    // объявлен глубже MainScreen → имеет приоритет над стеком вкладок.
+    BackHandler(enabled = ui.chat.isNotEmpty() && !ui.diagnosing) { onClear() }
     // Автопрокрутка к последнему сообщению при появлении новых и при печати статусов.
     LaunchedEffect(ui.chat.size, ui.diagnosing) {
         val count = ui.chat.size + if (ui.diagnosing) 1 else 0
@@ -151,6 +157,54 @@ private fun shareReport(context: android.content.Context, chat: List<ChatMessage
     }
     context.startActivity(android.content.Intent.createChooser(intent, "Поделиться отчётом"))
 }
+
+/**
+ * Преобразует GFM-таблицы Markdown в маркированный список: широкие таблицы не
+ * помещаются на узком экране, а списком «первая ячейка · Заголовок: значение»
+ * видно всю информацию. Не-табличный текст остаётся без изменений.
+ */
+private fun flattenMarkdownTables(md: String): String {
+    if (!md.contains('|')) return md // быстрый путь — таблиц нет
+    val lines = md.split("\n")
+    val out = StringBuilder()
+    var i = 0
+    while (i < lines.size) {
+        val header = lines[i]
+        val sep = lines.getOrNull(i + 1)
+        if (isTableRow(header) && sep != null && isTableSeparator(sep)) {
+            val headers = tableCells(header)
+            i += 2 // пропускаем строку заголовков и разделитель |---|
+            while (i < lines.size && isTableRow(lines[i])) {
+                val cells = tableCells(lines[i])
+                out.append("- ")
+                if (cells.isNotEmpty()) out.append("**").append(cells[0]).append("**")
+                for (c in 1 until cells.size) {
+                    val h = headers.getOrNull(c)?.takeIf { it.isNotBlank() }
+                    out.append(if (h != null) " · $h: ${cells[c]}" else " · ${cells[c]}")
+                }
+                out.append('\n')
+                i++
+            }
+        } else {
+            out.append(header).append('\n')
+            i++
+        }
+    }
+    return out.toString().trimEnd('\n')
+}
+
+private fun isTableRow(line: String): Boolean {
+    val t = line.trim()
+    return t.startsWith("|") && t.count { it == '|' } >= 2
+}
+
+private fun isTableSeparator(line: String): Boolean {
+    val t = line.trim()
+    return t.startsWith("|") && t.contains('-') && t.all { it == '|' || it == '-' || it == ':' || it == ' ' }
+}
+
+private fun tableCells(line: String): List<String> =
+    line.trim().trim('|').split('|').map { it.trim() }
 
 private val SYMPTOMS = listOf(
     "Плавают обороты на холостых",
@@ -320,8 +374,9 @@ private fun ChatBubble(msg: ChatMessage) {
             color = bg,
         ) {
             if (msg.role == ChatRole.ASSISTANT) {
-                // Markdown-ответ модели (жирный, списки, таблицы, код) рендерится, а не сырой текст.
-                Markdown(content = msg.text, modifier = Modifier.padding(14.dp))
+                // Markdown-ответ модели рендерится; широкие таблицы предварительно
+                // сплющиваются в список, иначе на узком экране их не прочитать.
+                Markdown(content = flattenMarkdownTables(msg.text), modifier = Modifier.padding(14.dp))
             } else {
                 Text(msg.text, Modifier.padding(14.dp), color = fg, style = MaterialTheme.typography.bodyMedium)
             }
@@ -339,7 +394,7 @@ private fun ChatInput(
     canShare: Boolean,
     hasChat: Boolean,
 ) {
-    var text by remember { mutableStateOf("") }
+    var text by rememberSaveable { mutableStateOf("") }
     var image by remember { mutableStateOf<LlmImage?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()

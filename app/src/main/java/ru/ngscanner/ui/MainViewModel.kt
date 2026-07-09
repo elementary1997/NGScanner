@@ -130,7 +130,9 @@ private class LoadedState(
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val controller = BluetoothController(app)
-    private val settings = AppSettings(app)
+    // Ленивая инициализация: создание EncryptedSharedPreferences (Tink/keystore) и
+    // разовая миграция тяжёлые — первый доступ идёт из фоновой init-корутины (IO).
+    private val settings by lazy { AppSettings(app) }
     private val garageRepo = GarageRepository(app)
     private val normsRepo = ModelNormsRepository(app)
     private val chatRepo = ChatRepository(app)
@@ -172,21 +174,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     history = chatRepo.loadHistory(),
                 )
             }
-            llmHistory = loaded.history
-            // Мержим в текущее состояние, не затирая рантайм-поля (Bluetooth, соединение),
-            // которые мог успеть выставить refreshDevices() за время загрузки.
-            _ui.update {
-                it.copy(
-                    provider = loaded.provider,
-                    model = loaded.model,
-                    hasKey = loaded.hasKey,
-                    apiKey = loaded.apiKey,
-                    garage = loaded.garage,
-                    modelNorms = loaded.modelNorms,
-                    chat = loaded.chat,
-                    sessions = loaded.sessions,
-                    keysEncrypted = loaded.keysEncrypted,
-                    favorites = loaded.favorites,
+            if (llmHistory.isEmpty()) llmHistory = loaded.history
+            // Вливаем сохранённые данные ТОЛЬКО в поля, которых пользователь ещё не
+            // трогал (значение = стартовому пустому). Иначе действие, совершённое за
+            // десятки мс загрузки (ввод ключа, тап по симптому, toggleFavorite,
+            // addCar), было бы молча откачено снимком с диска.
+            val empty = UiState()
+            _ui.update { cur ->
+                cur.copy(
+                    provider = if (cur.provider == empty.provider) loaded.provider else cur.provider,
+                    model = if (cur.model == empty.model) loaded.model else cur.model,
+                    hasKey = if (cur.apiKey == empty.apiKey) loaded.hasKey else cur.hasKey,
+                    apiKey = if (cur.apiKey == empty.apiKey) loaded.apiKey else cur.apiKey,
+                    garage = if (cur.garage == empty.garage) loaded.garage else cur.garage,
+                    modelNorms = if (cur.modelNorms == empty.modelNorms) loaded.modelNorms else cur.modelNorms,
+                    chat = if (cur.chat == empty.chat) loaded.chat else cur.chat,
+                    sessions = if (cur.sessions == empty.sessions) loaded.sessions else cur.sessions,
+                    keysEncrypted = loaded.keysEncrypted, // не редактируется пользователем
+                    favorites = if (cur.favorites == empty.favorites) loaded.favorites else cur.favorites,
                 )
             }
         }
@@ -233,7 +238,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Добавляет/убирает адаптер из избранного (быстрое подключение на «Приборах»). */
     fun toggleFavorite(device: DeviceUi) {
-        _ui.update { it.copy(favorites = favoritesRepo.toggle(device)) }
+        // Запись на диск — вне лямбды update{} (она может повториться на CAS-ретрае, а
+        // toggle не идемпотентна) и на IO.
+        viewModelScope.launch {
+            val updated = withContext(Dispatchers.IO) { favoritesRepo.toggle(device) }
+            _ui.update { it.copy(favorites = updated) }
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -540,7 +550,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (history.size <= MAX_HISTORY_MSGS) return history
         var start = history.size - MAX_HISTORY_MSGS
         while (start < history.size && history[start].role != Role.USER) start++
-        return if (start >= history.size) history.takeLast(MAX_HISTORY_MSGS) else history.drop(start)
+        if (start < history.size) return history.drop(start)
+        // В хвостовом окне нет хода пользователя — расширяем назад до последнего USER,
+        // чтобы не начать с tool_result (провайдер вернёт 400). Нет USER вовсе —
+        // отдаём историю целиком, не takeLast с разорванной парой tool_use/tool_result.
+        val lastUser = history.indexOfLast { it.role == Role.USER }
+        return if (lastUser >= 0) history.drop(lastUser) else history
     }
 
     private fun errorMessage(ex: Throwable): String =

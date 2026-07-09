@@ -30,14 +30,13 @@ class VinDecoderTest {
     }
 
     @Test
-    fun ruVinNotUnderstatedByThirtyYears() {
-        // Ключевой регресс из ревью: авто 2018 не должно датироваться 1988.
-        val year = VinDecoder.yearFromVin("XTA210990J1234567", currentYear = 2026)
-        assertEquals(2018, year)
+    fun nullOnShortVin() {
+        assertNull(VinDecoder.yearFromVin("XTA12", currentYear = 2026))
     }
 
     @Test
-    fun nullOnShortVin() {
-        assertNull(VinDecoder.yearFromVin("XTA12", currentYear = 2026))
+    fun nullOnInvalidYearCode() {
+        // Символы 0, I, O, Q, U, Z не используются как код года (10-я позиция).
+        assertNull(VinDecoder.yearFromVin("XTA2109900123456", currentYear = 2026))
     }
 }

@@ -175,6 +175,14 @@ class ObdParserTest {
         assertNull(ObdParser.parseVin("NO DATA"))
     }
 
+    @Test
+    fun parsesMultiframeVinWithCanHeader() {
+        // Боевой путь: заголовки ATH1, один ЭБУ 7E8, First+Consecutive Frames.
+        // FF 1014 (len 20) + CF 21/22 → VIN «XTA210990Y1234567».
+        val raw = "7E81014490201585441\r7E82132313039393059\r7E82231323334353637\r\r>"
+        assertEquals("XTA210990Y1234567", ObdParser.parseVin(raw, headerHexLen = 3))
+    }
+
     // ---- ISO-TP: многофреймовый VIN, авто-форматирование ELM327 (CAF on) ----
     @Test
     fun parsesMultiframeVinColonFormat() {
