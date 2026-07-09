@@ -37,6 +37,7 @@ import ru.ngscanner.llm.LlmMessage
 import ru.ngscanner.llm.LlmModel
 import ru.ngscanner.llm.LlmProvider
 import ru.ngscanner.llm.ProviderId
+import ru.ngscanner.llm.ToolCall
 import ru.ngscanner.llm.LlmException
 import ru.ngscanner.obd.DtcDatabase
 import ru.ngscanner.obd.Elm327
@@ -304,6 +305,62 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Прерывает текущую диагностику (в т.ч. зациклившийся на лимите шагов агент). */
     fun cancelDiagnosis() {
         diagnoseJob?.cancel()
+    }
+
+    /**
+     * Офлайн-диагностика без ИИ и интернета: читает коды с адаптера, расшифровывает
+     * по бортовой базе DTC и отмечает параметры вне нормы. Работает там, где нет сети.
+     */
+    fun localDiagnose() {
+        val adapter = elm
+        if (adapter == null) {
+            appendChat(ChatMessage(ChatRole.SYSTEM, "Сначала подключите адаптер на вкладке «Приборы»."))
+            return
+        }
+        if (_ui.value.diagnosing) return
+        appendChat(ChatMessage(ChatRole.USER, "🔧 Локальная диагностика (без интернета)"))
+        _ui.update { it.copy(diagnosing = true) }
+        val wasPolling = pollJob?.isActive == true
+        stopPolling()
+        diagnoseJob = viewModelScope.launch {
+            try {
+                val executor = ObdToolExecutor(
+                    adapter,
+                    describeDtc = { code -> DtcDatabase.describe(getApplication(), code) },
+                )
+                val active = executor.execute(ToolCall("l1", "read_dtcs", "{}")).content
+                val pending = executor.execute(ToolCall("l2", "read_pending_dtcs", "{}")).content
+                appendChat(ChatMessage(ChatRole.ASSISTANT, buildLocalReport(active, pending, _ui.value.metrics)))
+            } catch (ex: Exception) {
+                appendChat(ChatMessage(ChatRole.SYSTEM, "Ошибка локальной диагностики: ${ex.message}"))
+            } finally {
+                _ui.update { it.copy(diagnosing = false) }
+                chatRepo.save(_ui.value.chat, llmHistory)
+                if (wasPolling && elm != null) startPolling()
+            }
+        }
+    }
+
+    private fun buildLocalReport(active: String, pending: String, metrics: Map<ObdPid, Double>): String {
+        val sb = StringBuilder("**Локальная диагностика** — по бортовой базе, без ИИ\n\n")
+        sb.append("**Коды неисправностей**\n").append(active).append("\n\n")
+        if (!pending.contains("не обнаружены")) sb.append(pending).append("\n\n")
+
+        val abnormal = metrics.filter { (pid, v) ->
+            (pid.critHigh != null && v >= pid.critHigh) || (pid.warnHigh != null && v >= pid.warnHigh) ||
+                (pid.critLow != null && v <= pid.critLow) || (pid.warnLow != null && v <= pid.warnLow)
+        }
+        if (abnormal.isNotEmpty()) {
+            sb.append("**Параметры вне нормы**\n")
+            abnormal.forEach { (pid, v) ->
+                val value = if (v == v.toLong().toDouble()) v.toLong().toString() else "%.1f".format(v)
+                sb.append("• ${pid.label}: $value ${pid.unit} (норма ${pid.norm})\n")
+            }
+            sb.append('\n')
+        }
+        sb.append("_Это офлайн-вывод по кодам и параметрам. Для развёрнутого разбора причин " +
+            "включите интернет и запустите диагностику через ИИ._")
+        return sb.toString()
     }
 
     /** Показывает диалог подтверждения сброса кодов и ждёт ответа пользователя. */

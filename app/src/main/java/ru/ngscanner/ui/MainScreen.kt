@@ -105,6 +105,7 @@ import androidx.compose.material.icons.rounded.BluetoothDisabled
 import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -230,7 +231,13 @@ fun MainScreen(vm: MainViewModel) {
                     onDisconnect = vm::disconnect,
                     onRequestNorm = vm::requestNorm,
                 )
-                Tab.Chat -> ChatTab(ui, onSend = vm::sendMessage, onClear = vm::clearChat, onCancel = vm::cancelDiagnosis)
+                Tab.Chat -> ChatTab(
+                    ui,
+                    onSend = vm::sendMessage,
+                    onClear = vm::clearChat,
+                    onCancel = vm::cancelDiagnosis,
+                    onLocalDiagnose = vm::localDiagnose,
+                )
                 Tab.Garage -> GarageTab(ui, vm)
                 Tab.Settings -> SettingsTab(ui, vm)
             }
@@ -905,6 +912,7 @@ private fun ChatTab(
     onSend: (String, List<LlmImage>) -> Unit,
     onClear: () -> Unit,
     onCancel: () -> Unit,
+    onLocalDiagnose: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -920,7 +928,7 @@ private fun ChatTab(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (ui.chat.isEmpty()) {
-                item { EmptyChatHint(onSend = { onSend(it, emptyList()) }) }
+                item { EmptyChatHint(onSend = { onSend(it, emptyList()) }, onLocalDiagnose = onLocalDiagnose) }
             }
             items(ui.chat) { msg -> ChatBubble(msg) }
             if (ui.diagnosing) {
@@ -977,7 +985,7 @@ private val SYMPTOMS = listOf(
 )
 
 @Composable
-private fun EmptyChatHint(onSend: (String) -> Unit) {
+private fun EmptyChatHint(onSend: (String) -> Unit, onLocalDiagnose: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 36.dp, start = 8.dp, end = 8.dp),
@@ -1005,6 +1013,11 @@ private fun EmptyChatHint(onSend: (String) -> Unit) {
             Icon(Icons.Rounded.Bolt, null)
             Spacer(Modifier.width(8.dp))
             Text("Быстрая диагностика")
+        }
+        OutlinedButton(onClick = onLocalDiagnose, shape = RoundedCornerShape(16.dp)) {
+            Icon(Icons.Rounded.CloudOff, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Без интернета — по кодам")
         }
         Spacer(Modifier.height(4.dp))
         Text(
