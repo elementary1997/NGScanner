@@ -34,7 +34,10 @@ class CloudRuProvider(
     override val displayName = "Cloud.ru Foundation Models"
 
     private val json = Json { ignoreUnknownKeys = true }
-    private val http = OkHttpClient.Builder().callTimeout(180, TimeUnit.SECONDS).build()
+    private val http = OkHttpClient.Builder()
+        .callTimeout(180, TimeUnit.SECONDS)
+        .addInterceptor(RetryInterceptor())
+        .build()
 
     override suspend fun availableModels(): List<LlmModel> = withContext(Dispatchers.IO) {
         val req = Request.Builder()
@@ -44,7 +47,7 @@ class CloudRuProvider(
             .build()
         http.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw RuntimeException("Cloud.ru API ${resp.code}: ${text.take(200)}")
+            if (!resp.isSuccessful) throw LlmException.fromHttp(resp.code, text)
             val data = json.parseToJsonElement(text).jsonObject["data"]?.jsonArray ?: return@use emptyList()
             data.mapNotNull { m ->
                 val id = m.jsonObject["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
@@ -62,7 +65,7 @@ class CloudRuProvider(
             .build()
         http.newCall(httpReq).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw RuntimeException("Cloud.ru API ${resp.code}: ${text.take(300)}")
+            if (!resp.isSuccessful) throw LlmException.fromHttp(resp.code, text)
             parseResponse(text)
         }
     }

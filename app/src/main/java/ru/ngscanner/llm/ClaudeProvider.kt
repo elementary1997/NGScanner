@@ -36,7 +36,10 @@ class ClaudeProvider(
     override val displayName = "Anthropic Claude"
 
     private val json = Json { ignoreUnknownKeys = true }
-    private val http = OkHttpClient.Builder().callTimeout(180, TimeUnit.SECONDS).build()
+    private val http = OkHttpClient.Builder()
+        .callTimeout(180, TimeUnit.SECONDS)
+        .addInterceptor(RetryInterceptor())
+        .build()
 
     override suspend fun availableModels(): List<LlmModel> = withContext(Dispatchers.IO) {
         val req = Request.Builder()
@@ -47,7 +50,7 @@ class ClaudeProvider(
             .build()
         http.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw RuntimeException("Claude API ${resp.code}: ${text.take(200)}")
+            if (!resp.isSuccessful) throw LlmException.fromHttp(resp.code, text)
             val data = json.parseToJsonElement(text).jsonObject["data"]?.jsonArray ?: return@use emptyList()
             data.mapNotNull { m ->
                 val o = m.jsonObject
@@ -67,7 +70,7 @@ class ClaudeProvider(
             .build()
         http.newCall(httpReq).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw RuntimeException("Claude API ${resp.code}: ${text.take(300)}")
+            if (!resp.isSuccessful) throw LlmException.fromHttp(resp.code, text)
             parseResponse(text)
         }
     }
