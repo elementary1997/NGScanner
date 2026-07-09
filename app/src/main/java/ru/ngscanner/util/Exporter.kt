@@ -7,6 +7,8 @@ import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import androidx.core.content.FileProvider
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.FileOutputStream
 
@@ -15,6 +17,9 @@ import java.io.FileOutputStream
  * PDF из текста и открывает системный «Поделиться» для текста или PDF.
  */
 object Exporter {
+
+    // Сериализует сборку PDF: два тапа подряд не пишут в один файл одновременно.
+    private val exportMutex = Mutex()
 
     /** Делится обычным текстом через системный диалог. */
     fun shareText(context: Context, text: String) {
@@ -42,7 +47,7 @@ object Exporter {
      * Рендерит текст в PDF (A4, перенос по словам, многостраничный) и возвращает
      * content-URI через FileProvider. Тяжёлую отрисовку вызывать не на главном потоке.
      */
-    fun buildPdf(context: Context, title: String, rawText: String, fileTag: Long): Uri {
+    suspend fun buildPdf(context: Context, title: String, rawText: String, fileTag: Long): Uri = exportMutex.withLock {
         val text = stripMarkdown(rawText)
         val pageWidth = 595 // A4 @ 72dpi
         val pageHeight = 842
@@ -53,9 +58,13 @@ object Exporter {
         val lineHeight = 18f
 
         val dir = File(context.cacheDir, "shared").apply { mkdirs() }
-        // Чистим прежние экспорты, чтобы кэш не рос.
-        dir.listFiles()?.forEach { runCatching { it.delete() } }
         val file = File(dir, "ngscanner_$fileTag.pdf")
+        // Чистим только устаревшие экспорты (по возрасту), не трогая записываемый и
+        // свежие файлы — иначе синхронный снос всей папки рвёт открытый пользователем share.
+        val now = System.currentTimeMillis()
+        dir.listFiles()?.forEach { f ->
+            if (f.name != file.name && now - f.lastModified() > CACHE_TTL_MS) runCatching { f.delete() }
+        }
 
         val pdf = PdfDocument()
         try {
@@ -83,7 +92,7 @@ object Exporter {
             // Даже при сбое I/O освобождаем нативную память документа/страниц.
             pdf.close()
         }
-        return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
 
     /** Перенос по словам под ширину страницы; длинные слова жёстко режутся. */
@@ -130,4 +139,8 @@ object Exporter {
         .replace("`", "")
         .replace(Regex("(?m)^\\s{0,3}#{1,6}\\s*"), "")
         .replace(Regex("(?m)^\\s{0,3}>\\s?"), "")
+        // Маркеры списков -/*/+ → «• »; нумерацию «1.» оставляем как есть (читается).
+        .replace(Regex("(?m)^(\\s{0,3})[-*+]\\s+"), "$1• ")
+
+    private const val CACHE_TTL_MS = 3_600_000L // час: свежие экспорты (открытый share) не сносим
 }

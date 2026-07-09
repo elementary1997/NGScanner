@@ -2,6 +2,7 @@ package ru.ngscanner.ui
 
 import android.annotation.SuppressLint
 import android.app.Application
+import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -675,7 +676,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val app = getApplication<Application>()
             val uri = withContext(Dispatchers.IO) {
-                runCatching { Exporter.buildPdf(app, "Ответ NG Scanner", text, text.hashCode().toLong()) }.getOrNull()
+                runCatching { Exporter.buildPdf(app, "Ответ NG Scanner", text, text.hashCode().toLong()) }
+                    .getOrElse { Log.w(TAG, "Экспорт PDF не удался", it); null }
             }
             if (uri != null) Exporter.sharePdf(app, uri)
             else Toast.makeText(app, "Не удалось создать PDF", Toast.LENGTH_SHORT).show()
@@ -684,6 +686,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Сбрасывает помодельный счётчик расхода текущего провайдера. */
     fun resetUsage() {
+        if (_ui.value.diagnosing) return // идёт запрос — иначе строка воскреснет следующим usage-тиком
         usageRepo.reset(_ui.value.provider)
         _ui.update { it.copy(sessionTokens = 0, modelUsage = emptyList()) }
     }
@@ -695,6 +698,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Убирает конкретную модель из учёта расходов текущего провайдера. */
     fun removeModelUsage(model: String) {
+        if (_ui.value.diagnosing) return // идёт запрос — удалённая модель вернулась бы следующим тиком
         val updated = usageRepo.removeModel(_ui.value.provider, model)
         _ui.update { it.copy(modelUsage = updated) }
     }
@@ -949,6 +953,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        private const val TAG = "MainViewModel"
         private const val POLL_INTERVAL_MS = 1500L
         private const val POLL_IDLE_MS = 5000L
         private const val IDLE_THRESHOLD = 4
