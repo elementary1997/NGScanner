@@ -1,10 +1,13 @@
-@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 
 package ru.ngscanner.ui.components
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.Close
@@ -66,6 +69,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -367,9 +372,20 @@ private fun ChatBubble(msg: ChatMessage) {
     val alignment = if (msg.role == ChatRole.USER) Alignment.End else Alignment.Start
     // Ответ модели занимает всю ширину — таблицы и код помещаются целиком.
     val widthFraction = if (msg.role == ChatRole.ASSISTANT) 1f else 0.9f
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+    // Долгое нажатие копирует текст сообщения — удобно переслать свой вопрос заново,
+    // если запрос сорвался (нет сети), не перепечатывая его руками.
+    val copy = {
+        clipboard.setText(AnnotatedString(msg.text))
+        Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+    }
     Column(Modifier.fillMaxWidth()) {
         Surface(
-            modifier = Modifier.align(alignment).fillMaxWidth(widthFraction),
+            modifier = Modifier
+                .align(alignment)
+                .fillMaxWidth(widthFraction)
+                .combinedClickable(onClick = {}, onLongClick = copy),
             shape = RoundedCornerShape(16.dp),
             color = bg,
         ) {

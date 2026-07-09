@@ -56,6 +56,9 @@ enum class ConnectionState { Disconnected, Connecting, Connected }
 @kotlinx.serialization.Serializable
 data class DeviceUi(val name: String, val address: String)
 
+/** Точка истории параметра: значение и момент снятия (мс, System.currentTimeMillis). */
+data class MetricSample(val tMs: Long, val value: Double)
+
 @kotlinx.serialization.Serializable
 enum class ChatRole { USER, ASSISTANT, TOOL, SYSTEM }
 
@@ -77,8 +80,8 @@ data class UiState(
     val connection: ConnectionState = ConnectionState.Disconnected,
     val connectedName: String? = null,
     val metrics: Map<ObdPid, Double> = emptyMap(),
-    // история значений для мини-графиков (последние точки на параметр)
-    val history: Map<ObdPid, List<Double>> = emptyMap(),
+    // история значений с временными метками для графиков (последние точки на параметр)
+    val history: Map<ObdPid, List<MetricSample>> = emptyMap(),
     val error: String? = null,
     // диагностика / чат с LLM
     val chat: List<ChatMessage> = emptyList(),
@@ -295,17 +298,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (v != null) values[pid] = v
                 }
                 if (values.isNotEmpty()) {
+                    val now = System.currentTimeMillis()
                     _ui.update { state ->
                         val history = state.history.toMutableMap()
                         values.forEach { (pid, v) ->
-                            history[pid] = ((history[pid] ?: emptyList()) + v).takeLast(HISTORY_SIZE)
+                            history[pid] = ((history[pid] ?: emptyList()) + MetricSample(now, v)).takeLast(HISTORY_SIZE)
                         }
                         // Мержим, а не заменяем: промах одного PID (норма для ELM327)
                         // не должен гасить остальные приборы в «—» до следующего цикла.
                         state.copy(metrics = state.metrics + values, history = history)
                     }
                     emptyStreak = 0
-                    lastDataAt = System.currentTimeMillis()
+                    lastDataAt = now
                 } else {
                     emptyStreak++
                 }
@@ -848,7 +852,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private const val RECONNECT_ATTEMPTS = 5
         private const val RECONNECT_BASE_MS = 2000L
         private const val RECONNECT_MAX_MS = 16000L
-        private const val HISTORY_SIZE = 60
+        private const val HISTORY_SIZE = 240
         private const val MAX_HISTORY_MSGS = 40
         private const val SEARCH_DEBOUNCE_MS = 250L
     }
