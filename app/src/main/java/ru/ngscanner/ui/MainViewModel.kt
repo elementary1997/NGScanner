@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,6 +37,8 @@ import ru.ngscanner.llm.LlmMessage
 import ru.ngscanner.llm.LlmModel
 import ru.ngscanner.llm.LlmProvider
 import ru.ngscanner.llm.ProviderId
+import ru.ngscanner.llm.LlmException
+import ru.ngscanner.obd.DtcDatabase
 import ru.ngscanner.obd.Elm327
 import ru.ngscanner.obd.ObdPid
 import ru.ngscanner.settings.AppSettings
@@ -83,6 +87,8 @@ data class UiState(
     // модельные нормы параметров для активной машины: pidCmd -> текст нормы
     val modelNorms: Map<String, String> = emptyMap(),
     val normLoadingPid: String? = null,
+    // ожидается подтверждение сброса кодов (Mode 04)
+    val clearDtcsPending: Boolean = false,
 )
 
 /**
@@ -99,6 +105,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var transport: ClassicSppTransport? = null
     private var elm: Elm327? = null
     private var pollJob: Job? = null
+    private var diagnoseJob: Job? = null
+    private var clearConfirm: CompletableDeferred<Boolean>? = null
     private var llmHistory: List<LlmMessage> = emptyList()
 
     private val _ui = MutableStateFlow(
@@ -224,9 +232,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         appendChat(ChatMessage(ChatRole.USER, shown))
         _ui.update { it.copy(diagnosing = true) }
 
-        val executor = ObdToolExecutor(elm, saveNote = { note -> addSystemLogEntry(note) })
+        val executor = ObdToolExecutor(
+            elm,
+            allowClearDtcs = { requestClearConfirm() },
+            saveNote = { note -> addSystemLogEntry(note) },
+            describeDtc = { code -> DtcDatabase.describe(getApplication(), code) },
+        )
         val agent = DiagnosticAgent(buildProvider(_ui.value.provider, key), _ui.value.model, executor)
-        viewModelScope.launch {
+        // На время диалога опрос приборов ставим на паузу: half-duplex сокет ELM327
+        // не должен обслуживать опрос и инструменты агента одновременно.
+        val wasPolling = pollJob?.isActive == true
+        stopPolling()
+        diagnoseJob = viewModelScope.launch {
             try {
                 llmHistory = agent.run(text, images, llmHistory, carContext()) { event ->
                     val msg = when (event) {
@@ -235,13 +252,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     appendChat(msg)
                 }
+            } catch (ex: CancellationException) {
+                appendChat(ChatMessage(ChatRole.SYSTEM, "Диагностика прервана."))
+                throw ex
             } catch (ex: Exception) {
-                appendChat(ChatMessage(ChatRole.SYSTEM, "Ошибка: ${ex.message}"))
+                appendChat(ChatMessage(ChatRole.SYSTEM, errorMessage(ex)))
             } finally {
-                _ui.update { it.copy(diagnosing = false) }
+                clearConfirm?.complete(false)
+                clearConfirm = null
+                _ui.update { it.copy(diagnosing = false, clearDtcsPending = false) }
+                if (wasPolling && elm != null) startPolling()
             }
         }
     }
+
+    /** Прерывает текущую диагностику (в т.ч. зациклившийся на лимите шагов агент). */
+    fun cancelDiagnosis() {
+        diagnoseJob?.cancel()
+    }
+
+    /** Показывает диалог подтверждения сброса кодов и ждёт ответа пользователя. */
+    private suspend fun requestClearConfirm(): Boolean {
+        val deferred = CompletableDeferred<Boolean>()
+        clearConfirm = deferred
+        _ui.update { it.copy(clearDtcsPending = true) }
+        return deferred.await()
+    }
+
+    fun confirmClearDtcs(approved: Boolean) {
+        _ui.update { it.copy(clearDtcsPending = false) }
+        clearConfirm?.complete(approved)
+        clearConfirm = null
+    }
+
+    private fun errorMessage(ex: Throwable): String =
+        (ex as? LlmException ?: LlmException.from(ex)).userMessage()
 
     fun clearChat() {
         llmHistory = emptyList()

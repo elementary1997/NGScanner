@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -136,6 +137,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -159,7 +161,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 @Composable
 fun MainScreen(vm: MainViewModel) {
     val ui by vm.ui.collectAsState()
-    var tab by remember { mutableStateOf(Tab.Devices) }
+    var tab by rememberSaveable { mutableStateOf(Tab.Devices) }
 
     val permissions = bluetoothPermissions()
     val launcher = rememberLauncherForActivityResult(
@@ -211,12 +213,41 @@ fun MainScreen(vm: MainViewModel) {
                     onDisconnect = vm::disconnect,
                     onRequestNorm = vm::requestNorm,
                 )
-                Tab.Chat -> ChatTab(ui, onSend = vm::sendMessage, onClear = vm::clearChat)
+                Tab.Chat -> ChatTab(ui, onSend = vm::sendMessage, onClear = vm::clearChat, onCancel = vm::cancelDiagnosis)
                 Tab.Garage -> GarageTab(ui, vm)
                 Tab.Settings -> SettingsTab(ui, vm)
             }
         }
     }
+
+    if (ui.clearDtcsPending) {
+        ClearDtcsDialog(
+            onConfirm = { vm.confirmClearDtcs(true) },
+            onDismiss = { vm.confirmClearDtcs(false) },
+        )
+    }
+}
+
+@Composable
+private fun ClearDtcsDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.DeleteSweep, null, tint = MaterialTheme.colorScheme.error) },
+        title = { Text("Сбросить коды неисправностей?") },
+        text = {
+            Text(
+                "Ассистент просит выполнить сброс кодов (Mode 04). Это сотрёт сохранённые коды " +
+                    "и обнулит мониторы готовности (readiness) — после сброса автомобиль может не " +
+                    "пройти инструментальный контроль, пока не «наездит» циклы заново.",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Сбросить", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
 }
 
 @Composable
@@ -820,9 +851,21 @@ private fun ErrorCard(message: String) {
 // ---------- Вкладка «Диагностика» (чат с LLM) ----------
 
 @Composable
-private fun ChatTab(ui: UiState, onSend: (String, List<LlmImage>) -> Unit, onClear: () -> Unit) {
+private fun ChatTab(
+    ui: UiState,
+    onSend: (String, List<LlmImage>) -> Unit,
+    onClear: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val listState = rememberLazyListState()
+    // Автопрокрутка к последнему сообщению при появлении новых и при печати статусов.
+    LaunchedEffect(ui.chat.size, ui.diagnosing) {
+        val count = ui.chat.size + if (ui.diagnosing) 1 else 0
+        if (count > 0) listState.animateScrollToItem(count - 1)
+    }
     Column(Modifier.fillMaxSize()) {
         LazyColumn(
+            state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -836,6 +879,8 @@ private fun ChatTab(ui: UiState, onSend: (String, List<LlmImage>) -> Unit, onCle
                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(12.dp))
                         Text("Диагностирую…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = onCancel) { Text("Прервать") }
                     }
                 }
             }
@@ -937,7 +982,7 @@ private fun ChatInput(
         if (uri != null) scope.launch { image = ImageEncoder.encode(context, uri) }
     }
 
-    Surface(tonalElevation = 3.dp) {
+    Surface(modifier = Modifier.imePadding(), tonalElevation = 3.dp) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             if (image != null) {
                 Row(
@@ -1300,12 +1345,13 @@ private fun CarDetailScreen(
     onAddEntry: (String, Int?) -> Unit,
 ) {
     var showEntry by remember { mutableStateOf(false) }
+    var showDelete by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         GarageTopBar(car.title, onBack)
-        CarSpecCard(car, isActive, onMakeActive, onDelete)
+        CarSpecCard(car, isActive, onMakeActive, onDelete = { showDelete = true })
         CtxNote()
         LogbookSection(car.log) { showEntry = true }
         Spacer(Modifier.height(16.dp))
@@ -1314,6 +1360,20 @@ private fun CarDetailScreen(
         AddEntryDialog(
             onDismiss = { showEntry = false },
             onSave = { text, km -> onAddEntry(text, km); showEntry = false },
+        )
+    }
+    if (showDelete) {
+        AlertDialog(
+            onDismissRequest = { showDelete = false },
+            icon = { Icon(Icons.Rounded.DeleteOutline, null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Убрать «${car.title}»?") },
+            text = { Text("Машина и весь её бортжурнал будут удалены без возможности восстановления.") },
+            confirmButton = {
+                TextButton(onClick = { showDelete = false; onDelete() }) {
+                    Text("Убрать", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { showDelete = false }) { Text("Отмена") } },
         )
     }
 }
@@ -1674,20 +1734,55 @@ private fun AddByVinScreen(
             Text("✗ $it", style = MaterialTheme.typography.bodyMedium, color = cs.error)
         }
         if (info != null) {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = cs.surface,
-                border = BorderStroke(1.dp, cs.outline),
+            // Поля редактируемые: сервис мог определить не всё (частая ситуация для авто РФ) —
+            // пользователь проверяет и дописывает.
+            var make by remember(info) { mutableStateOf(info.make) }
+            var model by remember(info) { mutableStateOf(info.model) }
+            var year by remember(info) { mutableStateOf(info.year?.toString() ?: "") }
+            var engine by remember(info) { mutableStateOf(info.engine ?: "") }
+
+            Text(
+                if (info.model.isBlank()) {
+                    "Определена марка и год. Допишите модель и двигатель."
+                } else {
+                    "Проверьте данные и при необходимости поправьте."
+                },
+                style = MaterialTheme.typography.labelLarge,
+                color = cs.primary,
+            )
+            OutlinedTextField(
+                value = make,
+                onValueChange = { make = it },
                 modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(Modifier.padding(vertical = 4.dp)) {
-                    SpecRow("Марка", info.make)
-                    SpecRow("Модель", info.model)
-                    info.year?.let { SpecRow("Год", it.toString()) }
-                    info.engine?.let { SpecRow("Двигатель", it) }
-                    info.fuel?.let { SpecRow("Топливо", it) }
-                }
-            }
+                label = { Text("Марка") },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+            )
+            OutlinedTextField(
+                value = model,
+                onValueChange = { model = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Модель") },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+            )
+            OutlinedTextField(
+                value = year,
+                onValueChange = { v -> year = v.filter { it.isDigit() }.take(4) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Год выпуска") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                shape = RoundedCornerShape(14.dp),
+            )
+            OutlinedTextField(
+                value = engine,
+                onValueChange = { engine = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Двигатель") },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+            )
             OutlinedTextField(
                 value = mileage,
                 onValueChange = { v -> mileage = v.filter { it.isDigit() } },
@@ -1702,16 +1797,17 @@ private fun AddByVinScreen(
                     onSave(
                         Car(
                             id = GarageRepository.newCarId(),
-                            make = info.make,
-                            model = info.model,
-                            engine = info.engine,
-                            year = info.year,
+                            make = make.trim(),
+                            model = model.trim(),
+                            engine = engine.ifBlank { null },
+                            year = year.toIntOrNull(),
                             vin = vin.ifBlank { null },
                             fuel = info.fuel,
                             mileageKm = mileage.toIntOrNull(),
                         ),
                     )
                 },
+                enabled = make.isNotBlank() && model.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(14.dp),
             ) {
