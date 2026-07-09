@@ -25,12 +25,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.exclude
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -216,7 +213,14 @@ fun MainScreen(vm: MainViewModel) {
             }
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        // consumeWindowInsets сообщает вложенным элементам, что нижний отступ (навбар)
+        // уже применён Scaffold — тогда imePadding у панели ввода не удваивает его.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .consumeWindowInsets(padding),
+        ) {
             when (tab) {
                 Tab.Devices -> DevicesTab(
                     ui = ui,
@@ -1079,12 +1083,9 @@ private fun ChatInput(
         if (uri != null) scope.launch { image = ImageEncoder.encode(context, uri) }
     }
 
-    // Поднимаем панель ввода над клавиатурой. Из ime-инсета вычитаем navbar,
-    // который Scaffold уже учёл снизу — иначе получается двойной отступ (чёрная полоса).
-    Surface(
-        modifier = Modifier.windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars)),
-        tonalElevation = 3.dp,
-    ) {
+    // Панель ввода поднимается над клавиатурой. Навбар уже съеден consumeWindowInsets
+    // на уровне контента, поэтому imePadding даёт ровно высоту клавиатуры без двойного отступа.
+    Surface(modifier = Modifier.imePadding(), tonalElevation = 3.dp) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             if (image != null) {
                 Row(
