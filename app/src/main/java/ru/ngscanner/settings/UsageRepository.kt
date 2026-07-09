@@ -18,6 +18,12 @@ data class ModelUsage(
     val total: Long get() = prompt + completion
 }
 
+/** Цена модели, ₽ за 1 млн токенов, раздельно для входных и выходных (генерируемых). */
+@Serializable
+data class ModelPrice(val input: Double = 0.0, val output: Double = 0.0) {
+    val isSet: Boolean get() = input > 0 || output > 0
+}
+
 /**
  * Помодельный расход токенов по провайдерам и заданные пользователем цены
  * (₽ за 1 млн токенов). API отдаёт только потребление токенов (поле usage), а
@@ -53,16 +59,24 @@ class UsageRepository(context: Context) {
         prefs.edit().remove(modelsKey(provider)).apply()
     }
 
-    /** Цены ₽ за 1 млн токенов по id модели (общая карта для всех провайдеров). */
-    fun prices(): Map<String, Double> {
-        val raw = prefs.getString(KEY_PRICES, null) ?: return emptyMap()
-        return runCatching { json.decodeFromString<Map<String, Double>>(raw) }.getOrDefault(emptyMap())
+    /** Убирает одну модель из учёта провайдера и возвращает обновлённый список. */
+    fun removeModel(provider: ProviderId, model: String): List<ModelUsage> {
+        val updated = models(provider).filterNot { it.model == model }
+        prefs.edit().putString(modelsKey(provider), json.encodeToString(updated)).apply()
+        return updated
     }
 
-    /** Задаёт цену модели (0 или меньше — убирает) и возвращает обновлённую карту. */
-    fun setPrice(model: String, rubPerMillion: Double): Map<String, Double> {
+    /** Цены по id модели (общая карта для всех провайдеров). */
+    fun prices(): Map<String, ModelPrice> {
+        val raw = prefs.getString(KEY_PRICES, null) ?: return emptyMap()
+        return runCatching { json.decodeFromString<Map<String, ModelPrice>>(raw) }.getOrDefault(emptyMap())
+    }
+
+    /** Задаёт цену модели (обе нулевые — убирает) и возвращает обновлённую карту. */
+    fun setPrice(model: String, input: Double, output: Double): Map<String, ModelPrice> {
         val m = prices().toMutableMap()
-        if (rubPerMillion > 0) m[model] = rubPerMillion else m.remove(model)
+        val price = ModelPrice(input, output)
+        if (price.isSet) m[model] = price else m.remove(model)
         prefs.edit().putString(KEY_PRICES, json.encodeToString(m)).apply()
         return m
     }

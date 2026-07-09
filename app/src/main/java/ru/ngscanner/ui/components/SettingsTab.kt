@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
@@ -38,6 +39,7 @@ import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -60,6 +62,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import ru.ngscanner.llm.LlmModel
 import ru.ngscanner.llm.ProviderId
+import ru.ngscanner.settings.ModelPrice
 import ru.ngscanner.settings.ModelUsage
 import ru.ngscanner.ui.ConnectionState
 import ru.ngscanner.ui.UiState
@@ -190,7 +193,12 @@ internal fun SettingsTab(
             summary = "всего ${formatTokens(totalTokens)} ток.",
             initiallyExpanded = false,
         ) {
-            UsageContent(ui, onReset = vm::resetUsage, onSetPrice = vm::setModelPrice)
+            UsageContent(
+                ui,
+                onReset = vm::resetUsage,
+                onSetPrice = vm::setModelPrice,
+                onRemove = vm::removeModelUsage,
+            )
         }
 
         CollapsibleCard(
@@ -209,7 +217,12 @@ internal fun SettingsTab(
  * (API денег не отдаёт). Без внешней карточки — её даёт CollapsibleCard.
  */
 @Composable
-private fun UsageContent(ui: UiState, onReset: () -> Unit, onSetPrice: (String, Double) -> Unit) {
+private fun UsageContent(
+    ui: UiState,
+    onReset: () -> Unit,
+    onSetPrice: (String, Double, Double) -> Unit,
+    onRemove: (String) -> Unit,
+) {
     val cs = MaterialTheme.colorScheme
     val uriHandler = LocalUriHandler.current
     val (billingUrl, billingLabel) = if (ui.provider == ProviderId.CLOUD_RU) {
@@ -218,7 +231,7 @@ private fun UsageContent(ui: UiState, onReset: () -> Unit, onSetPrice: (String, 
         "https://console.anthropic.com/settings/billing" to "Биллинг Anthropic"
     }
     val totalTokens = ui.modelUsage.sumOf { it.total }
-    val totalCost = ui.modelUsage.sumOf { (it.total / 1_000_000.0) * (ui.modelPrices[it.model] ?: 0.0) }
+    val totalCost = ui.modelUsage.sumOf { modelCost(it, ui.modelPrices[it.model]) }
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
         UsageStat("За сессию", "${formatTokens(ui.sessionTokens.toLong())} ток.")
@@ -235,7 +248,7 @@ private fun UsageContent(ui: UiState, onReset: () -> Unit, onSetPrice: (String, 
     } else {
         HorizontalDivider(color = cs.outlineVariant)
         ui.modelUsage.forEach { usage ->
-            ModelUsageRow(usage, ui.modelPrices[usage.model] ?: 0.0, onSetPrice)
+            ModelUsageRow(usage, ui.modelPrices[usage.model], onSetPrice) { onRemove(usage.model) }
         }
     }
 
@@ -261,11 +274,23 @@ private fun UsageContent(ui: UiState, onReset: () -> Unit, onSetPrice: (String, 
     }
 }
 
-/** Строка одной модели: название, токены/запросы, оценка суммы и поле цены. */
+/**
+ * Строка одной модели: входные/выходные токены, запросы, оценка суммы и два поля
+ * цены (₽ за 1 млн входных и генерируемых токенов — они у Cloud.ru разные).
+ */
 @Composable
-private fun ModelUsageRow(usage: ModelUsage, price: Double, onSetPrice: (String, Double) -> Unit) {
+private fun ModelUsageRow(
+    usage: ModelUsage,
+    price: ModelPrice?,
+    onSetPrice: (String, Double, Double) -> Unit,
+    onRemove: () -> Unit,
+) {
     val cs = MaterialTheme.colorScheme
-    var priceText by remember(usage.model, price) { mutableStateOf(if (price > 0) formatPrice(price) else "") }
+    val inPrice = price?.input ?: 0.0
+    val outPrice = price?.output ?: 0.0
+    var inText by remember(usage.model, inPrice) { mutableStateOf(if (inPrice > 0) formatPrice(inPrice) else "") }
+    var outText by remember(usage.model, outPrice) { mutableStateOf(if (outPrice > 0) formatPrice(outPrice) else "") }
+    val cost = modelCost(usage, price)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -276,37 +301,58 @@ private fun ModelUsageRow(usage: ModelUsage, price: Double, onSetPrice: (String,
                     maxLines = 1,
                 )
                 Text(
-                    "${formatTokens(usage.total)} ток · ${usage.requests} запр.",
+                    "вход ${formatTokens(usage.prompt)} · выход ${formatTokens(usage.completion)} · ${usage.requests} запр.",
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
                     color = cs.onSurfaceVariant,
                 )
             }
-            if (price > 0) {
+            if (cost > 0) {
                 Text(
-                    "≈ ${formatRub((usage.total / 1_000_000.0) * price)} ₽",
+                    "≈ ${formatRub(cost)} ₽",
                     style = MaterialTheme.typography.titleSmall,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold,
                     color = cs.primary,
                 )
             }
+            IconButton(onClick = onRemove, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Rounded.DeleteOutline, "Убрать модель из учёта", Modifier.size(18.dp), tint = cs.onSurfaceVariant)
+            }
         }
-        OutlinedTextField(
-            value = priceText,
-            onValueChange = { v ->
-                val filtered = v.filter { it.isDigit() || it == '.' || it == ',' }.take(9)
-                priceText = filtered
-                onSetPrice(usage.model, filtered.replace(',', '.').toDoubleOrNull() ?: 0.0)
-            },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Цена, ₽ за 1 млн токенов") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            shape = RoundedCornerShape(12.dp),
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PriceField("Вход, ₽/1М", inText, Modifier.weight(1f)) {
+                inText = it
+                onSetPrice(usage.model, inText.toPrice(), outText.toPrice())
+            }
+            PriceField("Выход, ₽/1М", outText, Modifier.weight(1f)) {
+                outText = it
+                onSetPrice(usage.model, inText.toPrice(), outText.toPrice())
+            }
+        }
     }
 }
+
+@Composable
+private fun PriceField(label: String, value: String, modifier: Modifier, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { onChange(it.filter { c -> c.isDigit() || c == '.' || c == ',' }.take(9)) },
+        modifier = modifier,
+        label = { Text(label, maxLines = 1) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        shape = RoundedCornerShape(12.dp),
+    )
+}
+
+/** Оценка суммы модели: входные токены × цена входа + выходные × цена выхода. */
+private fun modelCost(usage: ModelUsage, price: ModelPrice?): Double {
+    if (price == null) return 0.0
+    return (usage.prompt / 1_000_000.0) * price.input + (usage.completion / 1_000_000.0) * price.output
+}
+
+private fun String.toPrice(): Double = replace(',', '.').toDoubleOrNull() ?: 0.0
 
 /** Содержимое сворачиваемой секции «Приватность и хранение». */
 @Composable

@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 
 package ru.ngscanner.ui.components
 
@@ -6,9 +6,11 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Image
@@ -67,6 +69,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ripple
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -78,10 +81,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -383,31 +390,52 @@ private fun ChatBubble(msg: ChatMessage) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
     var menuOpen by remember { mutableStateOf(false) }
+    var pressAt by remember { mutableStateOf(Offset.Zero) }
+    val interaction = remember { MutableInteractionSource() }
     Column(Modifier.fillMaxWidth()) {
         Box(Modifier.align(alignment).fillMaxWidth(widthFraction)) {
             Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    // Долгое нажатие — меню действий (копировать/поделиться/PDF), без ripple.
-                    .combinedClickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {},
-                        onLongClick = { menuOpen = true },
-                    ),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 color = bg,
+                // Подсвечиваем сообщение, для которого открыто меню.
+                border = if (menuOpen) BorderStroke(1.5.dp, cs.primary) else null,
             ) {
-                if (msg.role == ChatRole.ASSISTANT) {
-                    // Markdown-ответ модели рендерится; широкие таблицы предварительно
-                    // сплющиваются в список, иначе на узком экране их не прочитать.
-                    Markdown(content = flattenMarkdownTables(msg.text), modifier = Modifier.padding(14.dp))
-                } else {
-                    Text(msg.text, Modifier.padding(14.dp), color = fg, style = MaterialTheme.typography.bodyMedium)
+                Box(
+                    Modifier
+                        // Тап/долгое нажатие открывают меню действий у точки касания;
+                        // ripple даёт понятную обратную связь, что нажатие поймано.
+                        .indication(interaction, ripple())
+                        .pointerInput(msg.text) {
+                            detectTapGestures(
+                                onPress = {
+                                    val press = PressInteraction.Press(it)
+                                    interaction.emit(press)
+                                    interaction.emit(
+                                        if (tryAwaitRelease()) PressInteraction.Release(press) else PressInteraction.Cancel(press),
+                                    )
+                                },
+                                onTap = { pressAt = it; menuOpen = true },
+                                onLongPress = { pressAt = it; menuOpen = true },
+                            )
+                        },
+                ) {
+                    if (msg.role == ChatRole.ASSISTANT) {
+                        // Markdown-ответ модели рендерится; широкие таблицы предварительно
+                        // сплющиваются в список, иначе на узком экране их не прочитать.
+                        Markdown(content = flattenMarkdownTables(msg.text), modifier = Modifier.padding(14.dp))
+                    } else {
+                        Text(msg.text, Modifier.padding(14.dp), color = fg, style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                offset = DpOffset(with(density) { pressAt.x.toDp() }, with(density) { pressAt.y.toDp() }),
+            ) {
                 DropdownMenuItem(
                     text = { Text("Копировать") },
                     leadingIcon = { Icon(Icons.Rounded.ContentCopy, null) },
@@ -491,7 +519,7 @@ private fun ChatInput(
             Surface(shape = RoundedCornerShape(26.dp), color = cs.surfaceVariant.copy(alpha = 0.55f)) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(4.dp),
-                    verticalAlignment = Alignment.Bottom,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // «+» — прикрепить вложение (фото). Доступно только для vision-моделей.
                     if (visionEnabled) {

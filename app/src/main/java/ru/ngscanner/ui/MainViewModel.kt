@@ -51,6 +51,7 @@ import ru.ngscanner.service.ObdForegroundService
 import ru.ngscanner.settings.AppSettings
 import ru.ngscanner.settings.ChatRepository
 import ru.ngscanner.settings.FavoritesRepository
+import ru.ngscanner.settings.ModelPrice
 import ru.ngscanner.settings.ModelUsage
 import ru.ngscanner.settings.SessionSummary
 import ru.ngscanner.settings.UsageRepository
@@ -108,7 +109,7 @@ data class UiState(
     // расход токенов: за сессию приложения (сумма) и помодельно по провайдеру + цены
     val sessionTokens: Int = 0,
     val modelUsage: List<ModelUsage> = emptyList(),
-    val modelPrices: Map<String, Double> = emptyMap(),
+    val modelPrices: Map<String, ModelPrice> = emptyMap(),
     // гараж
     val garage: Garage = Garage(),
     val carSuggestions: List<VehicleSuggestion> = emptyList(),
@@ -135,7 +136,7 @@ private class LoadedState(
     val keysEncrypted: Boolean,
     val favorites: List<DeviceUi>,
     val modelUsage: List<ModelUsage>,
-    val modelPrices: Map<String, Double>,
+    val modelPrices: Map<String, ModelPrice>,
     val history: List<LlmMessage>,
 )
 
@@ -659,9 +660,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(sessionTokens = 0, modelUsage = emptyList()) }
     }
 
-    /** Задаёт цену модели (₽ за 1 млн токенов) для оценки суммы расхода. */
-    fun setModelPrice(model: String, rubPerMillion: Double) {
-        _ui.update { it.copy(modelPrices = usageRepo.setPrice(model, rubPerMillion)) }
+    /** Задаёт цены модели (₽ за 1 млн входных/выходных токенов) для оценки суммы расхода. */
+    fun setModelPrice(model: String, input: Double, output: Double) {
+        _ui.update { it.copy(modelPrices = usageRepo.setPrice(model, input, output)) }
+    }
+
+    /** Убирает конкретную модель из учёта расходов текущего провайдера. */
+    fun removeModelUsage(model: String) {
+        val updated = usageRepo.removeModel(_ui.value.provider, model)
+        _ui.update { it.copy(modelUsage = updated) }
     }
 
     private fun buildProvider(id: ProviderId, key: String): LlmProvider = when (id) {
