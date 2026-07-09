@@ -1,0 +1,3826 @@
+[
+ {
+  "make": "Lada",
+  "ru": "Лада",
+  "models": [
+   {
+    "model": "Granta",
+    "ru": "Гранта",
+    "yearFrom": 2011,
+    "engines": [
+     "1.6 8V",
+     "1.6 16V"
+    ]
+   },
+   {
+    "model": "Vesta",
+    "ru": "Веста",
+    "yearFrom": 2015,
+    "engines": [
+     "1.6 16V",
+     "1.8 16V"
+    ]
+   },
+   {
+    "model": "Vesta SW Cross",
+    "ru": "Веста SW Cross",
+    "yearFrom": 2017,
+    "engines": [
+     "1.6 16V",
+     "1.8 16V"
+    ]
+   },
+   {
+    "model": "XRAY",
+    "ru": "Икс-Рей",
+    "yearFrom": 2015,
+    "yearTo": 2022,
+    "engines": [
+     "1.6 16V",
+     "1.8 16V"
+    ]
+   },
+   {
+    "model": "Largus",
+    "ru": "Ларгус",
+    "yearFrom": 2012,
+    "engines": [
+     "1.6 8V",
+     "1.6 16V"
+    ]
+   },
+   {
+    "model": "Niva Legend",
+    "ru": "Нива Легенд",
+    "yearFrom": 2021,
+    "engines": [
+     "1.7 8V"
+    ]
+   },
+   {
+    "model": "Niva Travel",
+    "ru": "Нива Тревел",
+    "yearFrom": 2021,
+    "engines": [
+     "1.7 8V"
+    ]
+   },
+   {
+    "model": "Kalina",
+    "ru": "Калина",
+    "generation": "II",
+    "yearFrom": 2013,
+    "yearTo": 2018,
+    "engines": [
+     "1.6 8V",
+     "1.6 16V"
+    ]
+   },
+   {
+    "model": "Priora",
+    "ru": "Приора",
+    "yearFrom": 2007,
+    "yearTo": 2018,
+    "engines": [
+     "1.6 8V",
+     "1.6 16V"
+    ]
+   },
+   {
+    "model": "Samara",
+    "ru": "Самара",
+    "generation": "2114",
+    "yearFrom": 2001,
+    "yearTo": 2013,
+    "engines": [
+     "1.5 8V",
+     "1.6 8V"
+    ]
+   },
+   {
+    "model": "2107",
+    "yearFrom": 1982,
+    "yearTo": 2012,
+    "engines": [
+     "1.5 8V",
+     "1.6 8V"
+    ]
+   },
+   {
+    "model": "2110",
+    "yearFrom": 1995,
+    "yearTo": 2007,
+    "engines": [
+     "1.5 8V",
+     "1.6 16V"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "УАЗ",
+  "ru": "УАЗ",
+  "models": [
+   {
+    "model": "Patriot",
+    "ru": "Патриот",
+    "yearFrom": 2005,
+    "engines": [
+     "2.7 ZMZ-409"
+    ]
+   },
+   {
+    "model": "Hunter",
+    "ru": "Хантер",
+    "yearFrom": 2003,
+    "engines": [
+     "2.7 ZMZ-409"
+    ]
+   },
+   {
+    "model": "Pickup",
+    "ru": "Пикап",
+    "yearFrom": 2008,
+    "engines": [
+     "2.7 ZMZ-409"
+    ]
+   },
+   {
+    "model": "Profi",
+    "yearFrom": 2017,
+    "engines": [
+     "2.7 ZMZ-409"
+    ]
+   },
+   {
+    "model": "СГР (Буханка)",
+    "yearFrom": 1965,
+    "engines": [
+     "2.7 ZMZ-409"
+    ]
+   },
+   {
+    "model": "469",
+    "yearFrom": 1972,
+    "yearTo": 2011,
+    "engines": [
+     "2.4",
+     "2.7"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "ГАЗ",
+  "ru": "ГАЗ",
+  "models": [
+   {
+    "model": "ГАЗель Next",
+    "yearFrom": 2013,
+    "engines": [
+     "2.7 EvoTech",
+     "2.8 Cummins ISF"
+    ]
+   },
+   {
+    "model": "ГАЗель Бизнес",
+    "yearFrom": 2010,
+    "engines": [
+     "2.7 UMZ",
+     "2.8 Cummins ISF"
+    ]
+   },
+   {
+    "model": "ГАЗель 3302",
+    "yearFrom": 1994,
+    "yearTo": 2010,
+    "engines": [
+     "2.4",
+     "2.9"
+    ]
+   },
+   {
+    "model": "Соболь",
+    "yearFrom": 1998,
+    "engines": [
+     "2.7 UMZ"
+    ]
+   },
+   {
+    "model": "Волга 3110",
+    "yearFrom": 1997,
+    "yearTo": 2005,
+    "engines": [
+     "2.3",
+     "2.4 ZMZ-406"
+    ]
+   },
+   {
+    "model": "Волга Siber",
+    "yearFrom": 2008,
+    "yearTo": 2010,
+    "engines": [
+     "2.4"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Toyota",
+  "ru": "Тойота",
+  "models": [
+   {
+    "model": "Corolla",
+    "ru": "Королла",
+    "generation": "E150",
+    "yearFrom": 2006,
+    "yearTo": 2013,
+    "engines": [
+     "1.4",
+     "1.6",
+     "1.8",
+     "2.0 D-4D"
+    ]
+   },
+   {
+    "model": "Corolla",
+    "ru": "Королла",
+    "generation": "E170",
+    "yearFrom": 2013,
+    "yearTo": 2019,
+    "engines": [
+     "1.3",
+     "1.6",
+     "1.8"
+    ]
+   },
+   {
+    "model": "Camry",
+    "ru": "Камри",
+    "generation": "XV50",
+    "yearFrom": 2011,
+    "yearTo": 2017,
+    "engines": [
+     "2.0",
+     "2.5",
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "Camry",
+    "ru": "Камри",
+    "generation": "XV70",
+    "yearFrom": 2017,
+    "engines": [
+     "2.0",
+     "2.5",
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "RAV4",
+    "ru": "РАВ4",
+    "generation": "XA40",
+    "yearFrom": 2012,
+    "yearTo": 2018,
+    "engines": [
+     "2.0",
+     "2.2 D-4D",
+     "2.5"
+    ]
+   },
+   {
+    "model": "RAV4",
+    "ru": "РАВ4",
+    "generation": "XA50",
+    "yearFrom": 2018,
+    "engines": [
+     "2.0",
+     "2.5 Hybrid"
+    ]
+   },
+   {
+    "model": "Land Cruiser 200",
+    "yearFrom": 2007,
+    "yearTo": 2021,
+    "engines": [
+     "4.5 D-4D",
+     "4.6 V8",
+     "5.7 V8"
+    ]
+   },
+   {
+    "model": "Land Cruiser Prado",
+    "ru": "Ленд Крузер Прадо",
+    "generation": "J150",
+    "yearFrom": 2009,
+    "engines": [
+     "2.7",
+     "2.8 D-4D",
+     "4.0 V6"
+    ]
+   },
+   {
+    "model": "Highlander",
+    "ru": "Хайлендер",
+    "yearFrom": 2013,
+    "yearTo": 2019,
+    "engines": [
+     "2.7",
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "Hilux",
+    "ru": "Хайлюкс",
+    "yearFrom": 2015,
+    "engines": [
+     "2.4 D-4D",
+     "2.8 D-4D"
+    ]
+   },
+   {
+    "model": "Yaris",
+    "ru": "Ярис",
+    "yearFrom": 2011,
+    "yearTo": 2020,
+    "engines": [
+     "1.0",
+     "1.3",
+     "1.5"
+    ]
+   },
+   {
+    "model": "Avensis",
+    "ru": "Авенсис",
+    "yearFrom": 2009,
+    "yearTo": 2018,
+    "engines": [
+     "1.6",
+     "1.8",
+     "2.0 D-4D"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Volkswagen",
+  "ru": "Фольксваген",
+  "models": [
+   {
+    "model": "Polo",
+    "ru": "Поло",
+    "yearFrom": 2009,
+    "yearTo": 2020,
+    "engines": [
+     "1.4",
+     "1.6 MPI",
+     "1.6 TDI"
+    ]
+   },
+   {
+    "model": "Golf",
+    "ru": "Гольф",
+    "generation": "V",
+    "yearFrom": 2003,
+    "yearTo": 2008,
+    "engines": [
+     "1.4",
+     "1.6",
+     "1.9 TDI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Golf",
+    "ru": "Гольф",
+    "generation": "VI",
+    "yearFrom": 2008,
+    "yearTo": 2012,
+    "engines": [
+     "1.4 TSI",
+     "1.6 TDI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Golf",
+    "ru": "Гольф",
+    "generation": "VII",
+    "yearFrom": 2012,
+    "yearTo": 2020,
+    "engines": [
+     "1.4 TSI",
+     "1.6 TDI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Passat",
+    "ru": "Пассат",
+    "generation": "B6",
+    "yearFrom": 2005,
+    "yearTo": 2010,
+    "engines": [
+     "1.8 TSI",
+     "2.0 TDI",
+     "2.0 FSI"
+    ]
+   },
+   {
+    "model": "Passat",
+    "ru": "Пассат",
+    "generation": "B7",
+    "yearFrom": 2010,
+    "yearTo": 2015,
+    "engines": [
+     "1.4 TSI",
+     "1.8 TSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Passat",
+    "ru": "Пассат",
+    "generation": "B8",
+    "yearFrom": 2014,
+    "engines": [
+     "1.4 TSI",
+     "2.0 TSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Tiguan",
+    "ru": "Тигуан",
+    "generation": "I",
+    "yearFrom": 2007,
+    "yearTo": 2016,
+    "engines": [
+     "1.4 TSI",
+     "2.0 TSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Tiguan",
+    "ru": "Тигуан",
+    "generation": "II",
+    "yearFrom": 2016,
+    "engines": [
+     "1.4 TSI",
+     "2.0 TSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Jetta",
+    "ru": "Джетта",
+    "yearFrom": 2010,
+    "yearTo": 2018,
+    "engines": [
+     "1.4 TSI",
+     "1.6 MPI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Touareg",
+    "ru": "Туарег",
+    "yearFrom": 2010,
+    "yearTo": 2018,
+    "engines": [
+     "3.0 TDI",
+     "3.6 FSI"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Kia",
+  "ru": "Киа",
+  "models": [
+   {
+    "model": "Rio",
+    "ru": "Рио",
+    "generation": "III",
+    "yearFrom": 2011,
+    "yearTo": 2017,
+    "engines": [
+     "1.4",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Rio",
+    "ru": "Рио",
+    "generation": "IV",
+    "yearFrom": 2017,
+    "engines": [
+     "1.4",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Ceed",
+    "ru": "Сид",
+    "generation": "JD",
+    "yearFrom": 2012,
+    "yearTo": 2018,
+    "engines": [
+     "1.4",
+     "1.6",
+     "1.6 CRDi"
+    ]
+   },
+   {
+    "model": "Cerato",
+    "ru": "Церато",
+    "yearFrom": 2013,
+    "yearTo": 2018,
+    "engines": [
+     "1.6",
+     "2.0"
+    ]
+   },
+   {
+    "model": "Sportage",
+    "ru": "Спортейдж",
+    "generation": "III",
+    "yearFrom": 2010,
+    "yearTo": 2015,
+    "engines": [
+     "1.6",
+     "2.0",
+     "2.0 CRDi"
+    ]
+   },
+   {
+    "model": "Sportage",
+    "ru": "Спортейдж",
+    "generation": "IV",
+    "yearFrom": 2015,
+    "yearTo": 2021,
+    "engines": [
+     "1.6 T-GDI",
+     "2.0",
+     "2.0 CRDi"
+    ]
+   },
+   {
+    "model": "Sorento",
+    "ru": "Соренто",
+    "yearFrom": 2012,
+    "yearTo": 2020,
+    "engines": [
+     "2.2 CRDi",
+     "2.4",
+     "3.3 V6"
+    ]
+   },
+   {
+    "model": "Optima",
+    "ru": "Оптима",
+    "yearFrom": 2015,
+    "yearTo": 2020,
+    "engines": [
+     "2.0",
+     "2.4"
+    ]
+   },
+   {
+    "model": "Soul",
+    "ru": "Соул",
+    "yearFrom": 2013,
+    "yearTo": 2019,
+    "engines": [
+     "1.6",
+     "2.0"
+    ]
+   },
+   {
+    "model": "Picanto",
+    "ru": "Пиканто",
+    "yearFrom": 2011,
+    "yearTo": 2017,
+    "engines": [
+     "1.0",
+     "1.2"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Hyundai",
+  "ru": "Хёндай",
+  "models": [
+   {
+    "model": "Solaris",
+    "ru": "Солярис",
+    "generation": "I",
+    "yearFrom": 2010,
+    "yearTo": 2017,
+    "engines": [
+     "1.4",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Solaris",
+    "ru": "Солярис",
+    "generation": "II",
+    "yearFrom": 2017,
+    "yearTo": 2022,
+    "engines": [
+     "1.4",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Creta",
+    "ru": "Крета",
+    "yearFrom": 2016,
+    "yearTo": 2021,
+    "engines": [
+     "1.6",
+     "2.0"
+    ]
+   },
+   {
+    "model": "Elantra",
+    "ru": "Элантра",
+    "generation": "MD",
+    "yearFrom": 2010,
+    "yearTo": 2016,
+    "engines": [
+     "1.6",
+     "1.8"
+    ]
+   },
+   {
+    "model": "Tucson",
+    "ru": "Туссан",
+    "yearFrom": 2015,
+    "yearTo": 2020,
+    "engines": [
+     "1.6 T-GDI",
+     "2.0",
+     "2.0 CRDi"
+    ]
+   },
+   {
+    "model": "Santa Fe",
+    "ru": "Санта Фе",
+    "yearFrom": 2012,
+    "yearTo": 2018,
+    "engines": [
+     "2.2 CRDi",
+     "2.4",
+     "3.3 V6"
+    ]
+   },
+   {
+    "model": "Sonata",
+    "ru": "Соната",
+    "yearFrom": 2014,
+    "yearTo": 2019,
+    "engines": [
+     "2.0",
+     "2.4"
+    ]
+   },
+   {
+    "model": "i30",
+    "ru": "ай30",
+    "yearFrom": 2011,
+    "yearTo": 2017,
+    "engines": [
+     "1.4",
+     "1.6",
+     "1.6 CRDi"
+    ]
+   },
+   {
+    "model": "ix35",
+    "ru": "ай-икс35",
+    "yearFrom": 2010,
+    "yearTo": 2015,
+    "engines": [
+     "1.6",
+     "2.0",
+     "2.0 CRDi"
+    ]
+   },
+   {
+    "model": "Getz",
+    "ru": "Гетц",
+    "yearFrom": 2002,
+    "yearTo": 2011,
+    "engines": [
+     "1.1",
+     "1.4",
+     "1.6"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Nissan",
+  "ru": "Ниссан",
+  "models": [
+   {
+    "model": "Qashqai",
+    "ru": "Кашкай",
+    "generation": "J10",
+    "yearFrom": 2007,
+    "yearTo": 2013,
+    "engines": [
+     "1.6",
+     "2.0",
+     "1.5 dCi"
+    ]
+   },
+   {
+    "model": "Qashqai",
+    "ru": "Кашкай",
+    "generation": "J11",
+    "yearFrom": 2013,
+    "yearTo": 2021,
+    "engines": [
+     "1.2 DIG-T",
+     "1.6",
+     "1.5 dCi"
+    ]
+   },
+   {
+    "model": "X-Trail",
+    "ru": "Икс-Трейл",
+    "generation": "T31",
+    "yearFrom": 2007,
+    "yearTo": 2014,
+    "engines": [
+     "2.0",
+     "2.5",
+     "2.0 dCi"
+    ]
+   },
+   {
+    "model": "X-Trail",
+    "ru": "Икс-Трейл",
+    "generation": "T32",
+    "yearFrom": 2014,
+    "engines": [
+     "1.6",
+     "2.0",
+     "1.6 dCi"
+    ]
+   },
+   {
+    "model": "Almera",
+    "ru": "Альмера",
+    "generation": "G15",
+    "yearFrom": 2012,
+    "yearTo": 2018,
+    "engines": [
+     "1.6"
+    ]
+   },
+   {
+    "model": "Juke",
+    "ru": "Джук",
+    "yearFrom": 2010,
+    "yearTo": 2019,
+    "engines": [
+     "1.6",
+     "1.6 DIG-T"
+    ]
+   },
+   {
+    "model": "Murano",
+    "ru": "Мурано",
+    "yearFrom": 2014,
+    "engines": [
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "Teana",
+    "ru": "Теана",
+    "generation": "J32",
+    "yearFrom": 2008,
+    "yearTo": 2014,
+    "engines": [
+     "2.5",
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "Note",
+    "ru": "Ноут",
+    "yearFrom": 2005,
+    "yearTo": 2013,
+    "engines": [
+     "1.4",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Terrano",
+    "ru": "Террано",
+    "yearFrom": 2014,
+    "engines": [
+     "1.6",
+     "2.0"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Renault",
+  "ru": "Рено",
+  "models": [
+   {
+    "model": "Logan",
+    "ru": "Логан",
+    "generation": "II",
+    "yearFrom": 2013,
+    "engines": [
+     "1.2",
+     "1.6 16V"
+    ]
+   },
+   {
+    "model": "Sandero",
+    "ru": "Сандеро",
+    "generation": "II",
+    "yearFrom": 2013,
+    "engines": [
+     "1.2",
+     "1.6 16V"
+    ]
+   },
+   {
+    "model": "Duster",
+    "ru": "Дастер",
+    "generation": "I",
+    "yearFrom": 2010,
+    "yearTo": 2021,
+    "engines": [
+     "1.6",
+     "2.0",
+     "1.5 dCi"
+    ]
+   },
+   {
+    "model": "Duster",
+    "ru": "Дастер",
+    "generation": "II",
+    "yearFrom": 2021,
+    "engines": [
+     "1.6",
+     "1.3 TCe",
+     "1.5 dCi"
+    ]
+   },
+   {
+    "model": "Kaptur",
+    "ru": "Каптюр",
+    "yearFrom": 2016,
+    "engines": [
+     "1.6",
+     "2.0"
+    ]
+   },
+   {
+    "model": "Megane",
+    "ru": "Меган",
+    "generation": "III",
+    "yearFrom": 2008,
+    "yearTo": 2016,
+    "engines": [
+     "1.5 dCi",
+     "1.6",
+     "2.0"
+    ]
+   },
+   {
+    "model": "Fluence",
+    "ru": "Флюенс",
+    "yearFrom": 2009,
+    "yearTo": 2016,
+    "engines": [
+     "1.6",
+     "2.0",
+     "1.5 dCi"
+    ]
+   },
+   {
+    "model": "Arkana",
+    "ru": "Аркана",
+    "yearFrom": 2019,
+    "engines": [
+     "1.6",
+     "1.3 TCe"
+    ]
+   },
+   {
+    "model": "Koleos",
+    "ru": "Колеос",
+    "yearFrom": 2008,
+    "yearTo": 2016,
+    "engines": [
+     "2.0 dCi",
+     "2.5"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Ford",
+  "ru": "Форд",
+  "models": [
+   {
+    "model": "Focus",
+    "ru": "Фокус",
+    "generation": "II",
+    "yearFrom": 2004,
+    "yearTo": 2011,
+    "engines": [
+     "1.4",
+     "1.6",
+     "1.8",
+     "2.0",
+     "1.6 TDCi"
+    ]
+   },
+   {
+    "model": "Focus",
+    "ru": "Фокус",
+    "generation": "III",
+    "yearFrom": 2011,
+    "yearTo": 2018,
+    "engines": [
+     "1.0 EcoBoost",
+     "1.6",
+     "2.0 TDCi"
+    ]
+   },
+   {
+    "model": "Fiesta",
+    "ru": "Фиеста",
+    "yearFrom": 2008,
+    "yearTo": 2017,
+    "engines": [
+     "1.0 EcoBoost",
+     "1.4",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Mondeo",
+    "ru": "Мондео",
+    "generation": "IV",
+    "yearFrom": 2007,
+    "yearTo": 2014,
+    "engines": [
+     "1.6",
+     "2.0",
+     "2.0 TDCi"
+    ]
+   },
+   {
+    "model": "Kuga",
+    "ru": "Куга",
+    "generation": "II",
+    "yearFrom": 2012,
+    "yearTo": 2019,
+    "engines": [
+     "1.5 EcoBoost",
+     "1.6",
+     "2.0 TDCi"
+    ]
+   },
+   {
+    "model": "Explorer",
+    "ru": "Эксплорер",
+    "yearFrom": 2010,
+    "yearTo": 2019,
+    "engines": [
+     "2.0 EcoBoost",
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "EcoSport",
+    "ru": "ЭкоСпорт",
+    "yearFrom": 2013,
+    "engines": [
+     "1.0 EcoBoost",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Transit",
+    "ru": "Транзит",
+    "yearFrom": 2013,
+    "engines": [
+     "2.2 TDCi",
+     "2.0 EcoBlue"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Chevrolet",
+  "ru": "Шевроле",
+  "models": [
+   {
+    "model": "Aveo",
+    "ru": "Авео",
+    "generation": "T300",
+    "yearFrom": 2011,
+    "yearTo": 2015,
+    "engines": [
+     "1.4",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Cruze",
+    "ru": "Круз",
+    "yearFrom": 2009,
+    "yearTo": 2016,
+    "engines": [
+     "1.6",
+     "1.8",
+     "2.0 VCDi"
+    ]
+   },
+   {
+    "model": "Lacetti",
+    "ru": "Лачетти",
+    "yearFrom": 2004,
+    "yearTo": 2013,
+    "engines": [
+     "1.4",
+     "1.6",
+     "1.8"
+    ]
+   },
+   {
+    "model": "Niva",
+    "ru": "Нива",
+    "yearFrom": 2002,
+    "yearTo": 2020,
+    "engines": [
+     "1.7 8V"
+    ]
+   },
+   {
+    "model": "Captiva",
+    "ru": "Каптива",
+    "yearFrom": 2006,
+    "yearTo": 2018,
+    "engines": [
+     "2.4",
+     "3.2 V6",
+     "2.0 VCDi"
+    ]
+   },
+   {
+    "model": "Cobalt",
+    "ru": "Кобальт",
+    "yearFrom": 2011,
+    "engines": [
+     "1.5"
+    ]
+   },
+   {
+    "model": "Spark",
+    "ru": "Спарк",
+    "yearFrom": 2009,
+    "yearTo": 2018,
+    "engines": [
+     "1.0",
+     "1.2"
+    ]
+   },
+   {
+    "model": "Tahoe",
+    "yearFrom": 2014,
+    "engines": [
+     "5.3 V8",
+     "6.2 V8"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Skoda",
+  "ru": "Шкода",
+  "models": [
+   {
+    "model": "Octavia",
+    "ru": "Октавия",
+    "generation": "A5",
+    "yearFrom": 2004,
+    "yearTo": 2013,
+    "engines": [
+     "1.4 TSI",
+     "1.6 MPI",
+     "1.8 TSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Octavia",
+    "ru": "Октавия",
+    "generation": "A7",
+    "yearFrom": 2013,
+    "yearTo": 2020,
+    "engines": [
+     "1.4 TSI",
+     "1.6 MPI",
+     "1.8 TSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Rapid",
+    "ru": "Рапид",
+    "yearFrom": 2012,
+    "yearTo": 2020,
+    "engines": [
+     "1.4 TSI",
+     "1.6 MPI"
+    ]
+   },
+   {
+    "model": "Fabia",
+    "ru": "Фабия",
+    "yearFrom": 2007,
+    "yearTo": 2014,
+    "engines": [
+     "1.2",
+     "1.4",
+     "1.6 TDI"
+    ]
+   },
+   {
+    "model": "Superb",
+    "ru": "Суперб",
+    "generation": "II",
+    "yearFrom": 2008,
+    "yearTo": 2015,
+    "engines": [
+     "1.8 TSI",
+     "2.0 TSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Kodiaq",
+    "ru": "Кодиак",
+    "yearFrom": 2016,
+    "engines": [
+     "1.4 TSI",
+     "2.0 TSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Karoq",
+    "ru": "Карок",
+    "yearFrom": 2017,
+    "engines": [
+     "1.4 TSI",
+     "1.6 TDI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Yeti",
+    "ru": "Йети",
+    "yearFrom": 2009,
+    "yearTo": 2017,
+    "engines": [
+     "1.2 TSI",
+     "1.8 TSI",
+     "2.0 TDI"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "BMW",
+  "ru": "БМВ",
+  "models": [
+   {
+    "model": "3 series",
+    "generation": "E90",
+    "yearFrom": 2005,
+    "yearTo": 2012,
+    "engines": [
+     "2.0i",
+     "2.5i",
+     "3.0i",
+     "2.0d"
+    ]
+   },
+   {
+    "model": "3 series",
+    "generation": "F30",
+    "yearFrom": 2011,
+    "yearTo": 2019,
+    "engines": [
+     "1.6i",
+     "2.0i",
+     "3.0i",
+     "2.0d"
+    ]
+   },
+   {
+    "model": "3 series",
+    "generation": "G20",
+    "yearFrom": 2018,
+    "engines": [
+     "2.0i",
+     "3.0i",
+     "2.0d"
+    ]
+   },
+   {
+    "model": "5 series",
+    "generation": "E60",
+    "yearFrom": 2003,
+    "yearTo": 2010,
+    "engines": [
+     "2.5i",
+     "3.0i",
+     "4.4i",
+     "3.0d"
+    ]
+   },
+   {
+    "model": "5 series",
+    "generation": "F10",
+    "yearFrom": 2010,
+    "yearTo": 2017,
+    "engines": [
+     "2.0i",
+     "3.0i",
+     "4.4i",
+     "2.0d"
+    ]
+   },
+   {
+    "model": "X5",
+    "ru": "Икс5",
+    "generation": "E70",
+    "yearFrom": 2006,
+    "yearTo": 2013,
+    "engines": [
+     "3.0i",
+     "4.8i",
+     "3.0d"
+    ]
+   },
+   {
+    "model": "X5",
+    "ru": "Икс5",
+    "generation": "F15",
+    "yearFrom": 2013,
+    "yearTo": 2018,
+    "engines": [
+     "3.0i",
+     "4.4i",
+     "3.0d"
+    ]
+   },
+   {
+    "model": "X3",
+    "ru": "Икс3",
+    "generation": "F25",
+    "yearFrom": 2010,
+    "yearTo": 2017,
+    "engines": [
+     "2.0i",
+     "2.8i",
+     "2.0d"
+    ]
+   },
+   {
+    "model": "X6",
+    "ru": "Икс6",
+    "generation": "E71",
+    "yearFrom": 2008,
+    "yearTo": 2014,
+    "engines": [
+     "3.0i",
+     "4.4i",
+     "3.0d"
+    ]
+   },
+   {
+    "model": "1 series",
+    "generation": "F20",
+    "yearFrom": 2011,
+    "yearTo": 2019,
+    "engines": [
+     "1.6i",
+     "2.0i",
+     "2.0d"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Mercedes-Benz",
+  "ru": "Мерседес-Бенц",
+  "models": [
+   {
+    "model": "C-class",
+    "generation": "W204",
+    "yearFrom": 2007,
+    "yearTo": 2014,
+    "engines": [
+     "1.8i",
+     "3.0i",
+     "2.1 CDI"
+    ]
+   },
+   {
+    "model": "C-class",
+    "generation": "W205",
+    "yearFrom": 2014,
+    "yearTo": 2021,
+    "engines": [
+     "1.6i",
+     "2.0i",
+     "2.1 CDI"
+    ]
+   },
+   {
+    "model": "E-class",
+    "generation": "W211",
+    "yearFrom": 2002,
+    "yearTo": 2009,
+    "engines": [
+     "1.8i",
+     "3.5i",
+     "3.0 CDI"
+    ]
+   },
+   {
+    "model": "E-class",
+    "generation": "W212",
+    "yearFrom": 2009,
+    "yearTo": 2016,
+    "engines": [
+     "1.8i",
+     "3.5i",
+     "2.1 CDI"
+    ]
+   },
+   {
+    "model": "E-class",
+    "generation": "W213",
+    "yearFrom": 2016,
+    "engines": [
+     "2.0i",
+     "3.0i",
+     "2.0d"
+    ]
+   },
+   {
+    "model": "GLK",
+    "ru": "ГЛК",
+    "generation": "X204",
+    "yearFrom": 2008,
+    "yearTo": 2015,
+    "engines": [
+     "3.0i",
+     "3.5i",
+     "2.1 CDI"
+    ]
+   },
+   {
+    "model": "GLE",
+    "ru": "ГЛЕ",
+    "yearFrom": 2015,
+    "engines": [
+     "3.0i",
+     "3.0d"
+    ]
+   },
+   {
+    "model": "ML",
+    "ru": "МЛ",
+    "generation": "W164",
+    "yearFrom": 2005,
+    "yearTo": 2011,
+    "engines": [
+     "3.5i",
+     "5.0i",
+     "3.0 CDI"
+    ]
+   },
+   {
+    "model": "S-class",
+    "generation": "W221",
+    "yearFrom": 2005,
+    "yearTo": 2013,
+    "engines": [
+     "3.5i",
+     "5.5i",
+     "3.0 CDI"
+    ]
+   },
+   {
+    "model": "Sprinter",
+    "ru": "Спринтер",
+    "yearFrom": 2006,
+    "engines": [
+     "2.1 CDI",
+     "3.0 CDI"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Audi",
+  "ru": "Ауди",
+  "models": [
+   {
+    "model": "A4",
+    "ru": "А4",
+    "generation": "B7",
+    "yearFrom": 2004,
+    "yearTo": 2008,
+    "engines": [
+     "1.8 T",
+     "2.0 TFSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "A4",
+    "ru": "А4",
+    "generation": "B8",
+    "yearFrom": 2007,
+    "yearTo": 2015,
+    "engines": [
+     "1.8 TFSI",
+     "2.0 TFSI",
+     "2.0 TDI",
+     "3.0 TDI"
+    ]
+   },
+   {
+    "model": "A6",
+    "ru": "А6",
+    "generation": "C6",
+    "yearFrom": 2004,
+    "yearTo": 2011,
+    "engines": [
+     "2.0 TFSI",
+     "2.8 FSI",
+     "3.0 TDI"
+    ]
+   },
+   {
+    "model": "A6",
+    "ru": "А6",
+    "generation": "C7",
+    "yearFrom": 2011,
+    "yearTo": 2018,
+    "engines": [
+     "2.0 TFSI",
+     "3.0 TFSI",
+     "2.0 TDI",
+     "3.0 TDI"
+    ]
+   },
+   {
+    "model": "A3",
+    "ru": "А3",
+    "generation": "8P",
+    "yearFrom": 2003,
+    "yearTo": 2012,
+    "engines": [
+     "1.4 TFSI",
+     "1.8 TFSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Q5",
+    "ru": "Ку5",
+    "generation": "8R",
+    "yearFrom": 2008,
+    "yearTo": 2017,
+    "engines": [
+     "2.0 TFSI",
+     "3.0 TFSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Q7",
+    "ru": "Ку7",
+    "generation": "4L",
+    "yearFrom": 2005,
+    "yearTo": 2015,
+    "engines": [
+     "3.0 TFSI",
+     "3.0 TDI",
+     "4.2 TDI"
+    ]
+   },
+   {
+    "model": "A5",
+    "ru": "А5",
+    "yearFrom": 2007,
+    "yearTo": 2016,
+    "engines": [
+     "2.0 TFSI",
+     "3.0 TDI"
+    ]
+   },
+   {
+    "model": "Q3",
+    "ru": "Ку3",
+    "yearFrom": 2011,
+    "yearTo": 2018,
+    "engines": [
+     "1.4 TFSI",
+     "2.0 TFSI",
+     "2.0 TDI"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Mazda",
+  "ru": "Мазда",
+  "models": [
+   {
+    "model": "3",
+    "generation": "BK",
+    "yearFrom": 2003,
+    "yearTo": 2009,
+    "engines": [
+     "1.6",
+     "2.0",
+     "2.3"
+    ]
+   },
+   {
+    "model": "3",
+    "generation": "BL",
+    "yearFrom": 2009,
+    "yearTo": 2013,
+    "engines": [
+     "1.6",
+     "2.0",
+     "2.3"
+    ]
+   },
+   {
+    "model": "3",
+    "generation": "BM",
+    "yearFrom": 2013,
+    "yearTo": 2018,
+    "engines": [
+     "1.5",
+     "2.0 SkyActiv"
+    ]
+   },
+   {
+    "model": "6",
+    "generation": "GH",
+    "yearFrom": 2007,
+    "yearTo": 2012,
+    "engines": [
+     "1.8",
+     "2.0",
+     "2.5"
+    ]
+   },
+   {
+    "model": "6",
+    "generation": "GJ",
+    "yearFrom": 2012,
+    "engines": [
+     "2.0 SkyActiv",
+     "2.5 SkyActiv"
+    ]
+   },
+   {
+    "model": "CX-5",
+    "ru": "СХ-5",
+    "yearFrom": 2011,
+    "engines": [
+     "2.0 SkyActiv",
+     "2.5 SkyActiv",
+     "2.2 SkyActiv-D"
+    ]
+   },
+   {
+    "model": "CX-7",
+    "ru": "СХ-7",
+    "yearFrom": 2006,
+    "yearTo": 2012,
+    "engines": [
+     "2.3 Turbo",
+     "2.5"
+    ]
+   },
+   {
+    "model": "CX-9",
+    "ru": "СХ-9",
+    "yearFrom": 2016,
+    "engines": [
+     "2.5 Turbo"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Honda",
+  "ru": "Хонда",
+  "models": [
+   {
+    "model": "Civic",
+    "generation": "8",
+    "yearFrom": 2005,
+    "yearTo": 2011,
+    "engines": [
+     "1.4",
+     "1.8",
+     "2.0"
+    ]
+   },
+   {
+    "model": "Civic",
+    "generation": "9",
+    "yearFrom": 2011,
+    "yearTo": 2016,
+    "engines": [
+     "1.4",
+     "1.8",
+     "1.6 i-DTEC"
+    ]
+   },
+   {
+    "model": "Accord",
+    "generation": "8",
+    "yearFrom": 2008,
+    "yearTo": 2013,
+    "engines": [
+     "2.0",
+     "2.4",
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "Accord",
+    "generation": "9",
+    "yearFrom": 2012,
+    "yearTo": 2018,
+    "engines": [
+     "2.0",
+     "2.4",
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "CR-V",
+    "generation": "III",
+    "yearFrom": 2006,
+    "yearTo": 2012,
+    "engines": [
+     "2.0",
+     "2.4",
+     "2.2 i-DTEC"
+    ]
+   },
+   {
+    "model": "CR-V",
+    "generation": "IV",
+    "yearFrom": 2012,
+    "yearTo": 2018,
+    "engines": [
+     "2.0",
+     "2.4"
+    ]
+   },
+   {
+    "model": "Pilot",
+    "yearFrom": 2008,
+    "yearTo": 2015,
+    "engines": [
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "Fit / Jazz",
+    "yearFrom": 2008,
+    "yearTo": 2014,
+    "engines": [
+     "1.3",
+     "1.5"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Mitsubishi",
+  "ru": "Мицубиси",
+  "models": [
+   {
+    "model": "Lancer",
+    "ru": "Лансер",
+    "generation": "X",
+    "yearFrom": 2007,
+    "yearTo": 2017,
+    "engines": [
+     "1.5",
+     "1.8",
+     "2.0"
+    ]
+   },
+   {
+    "model": "Outlander",
+    "ru": "Аутлендер",
+    "generation": "XL",
+    "yearFrom": 2006,
+    "yearTo": 2012,
+    "engines": [
+     "2.0",
+     "2.4",
+     "3.0 V6"
+    ]
+   },
+   {
+    "model": "Outlander",
+    "ru": "Аутлендер",
+    "generation": "III",
+    "yearFrom": 2012,
+    "engines": [
+     "2.0",
+     "2.4",
+     "3.0 V6"
+    ]
+   },
+   {
+    "model": "ASX",
+    "ru": "ЭйСХ",
+    "yearFrom": 2010,
+    "engines": [
+     "1.6",
+     "1.8",
+     "2.0"
+    ]
+   },
+   {
+    "model": "Pajero",
+    "ru": "Паджеро",
+    "generation": "IV",
+    "yearFrom": 2006,
+    "yearTo": 2021,
+    "engines": [
+     "3.0 V6",
+     "3.8 V6",
+     "3.2 DI-D"
+    ]
+   },
+   {
+    "model": "Pajero Sport",
+    "ru": "Паджеро Спорт",
+    "yearFrom": 2008,
+    "engines": [
+     "2.5 DI-D",
+     "3.0 V6"
+    ]
+   },
+   {
+    "model": "L200",
+    "ru": "Л200",
+    "yearFrom": 2006,
+    "engines": [
+     "2.4 DI-D",
+     "2.5 DI-D"
+    ]
+   },
+   {
+    "model": "Eclipse Cross",
+    "ru": "Эклипс Кросс",
+    "yearFrom": 2017,
+    "engines": [
+     "1.5 Turbo"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Opel",
+  "ru": "Опель",
+  "models": [
+   {
+    "model": "Astra",
+    "ru": "Астра",
+    "generation": "H",
+    "yearFrom": 2004,
+    "yearTo": 2014,
+    "engines": [
+     "1.4",
+     "1.6",
+     "1.8",
+     "1.7 CDTI"
+    ]
+   },
+   {
+    "model": "Astra",
+    "ru": "Астра",
+    "generation": "J",
+    "yearFrom": 2009,
+    "yearTo": 2015,
+    "engines": [
+     "1.4 Turbo",
+     "1.6",
+     "1.7 CDTI"
+    ]
+   },
+   {
+    "model": "Corsa",
+    "ru": "Корса",
+    "generation": "D",
+    "yearFrom": 2006,
+    "yearTo": 2014,
+    "engines": [
+     "1.2",
+     "1.4",
+     "1.3 CDTI"
+    ]
+   },
+   {
+    "model": "Insignia",
+    "ru": "Инсигния",
+    "yearFrom": 2008,
+    "yearTo": 2017,
+    "engines": [
+     "1.6",
+     "2.0 Turbo",
+     "2.0 CDTI"
+    ]
+   },
+   {
+    "model": "Zafira",
+    "ru": "Зафира",
+    "generation": "B",
+    "yearFrom": 2005,
+    "yearTo": 2014,
+    "engines": [
+     "1.6",
+     "1.8",
+     "1.9 CDTI"
+    ]
+   },
+   {
+    "model": "Mokka",
+    "ru": "Мокка",
+    "yearFrom": 2012,
+    "yearTo": 2019,
+    "engines": [
+     "1.4 Turbo",
+     "1.8",
+     "1.7 CDTI"
+    ]
+   },
+   {
+    "model": "Vectra",
+    "ru": "Вектра",
+    "generation": "C",
+    "yearFrom": 2002,
+    "yearTo": 2008,
+    "engines": [
+     "1.8",
+     "2.2",
+     "1.9 CDTI"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Peugeot",
+  "ru": "Пежо",
+  "models": [
+   {
+    "model": "308",
+    "generation": "I",
+    "yearFrom": 2007,
+    "yearTo": 2014,
+    "engines": [
+     "1.4",
+     "1.6",
+     "1.6 HDi"
+    ]
+   },
+   {
+    "model": "308",
+    "generation": "II",
+    "yearFrom": 2013,
+    "engines": [
+     "1.2 PureTech",
+     "1.6",
+     "1.6 HDi"
+    ]
+   },
+   {
+    "model": "408",
+    "yearFrom": 2010,
+    "engines": [
+     "1.6",
+     "1.6 THP"
+    ]
+   },
+   {
+    "model": "206",
+    "yearFrom": 1998,
+    "yearTo": 2012,
+    "engines": [
+     "1.4",
+     "1.6"
+    ]
+   },
+   {
+    "model": "207",
+    "yearFrom": 2006,
+    "yearTo": 2014,
+    "engines": [
+     "1.4",
+     "1.6",
+     "1.6 HDi"
+    ]
+   },
+   {
+    "model": "3008",
+    "yearFrom": 2009,
+    "engines": [
+     "1.6 THP",
+     "1.6 HDi",
+     "2.0 HDi"
+    ]
+   },
+   {
+    "model": "Partner",
+    "yearFrom": 2008,
+    "engines": [
+     "1.6",
+     "1.6 HDi"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Citroen",
+  "ru": "Ситроен",
+  "models": [
+   {
+    "model": "C4",
+    "generation": "I",
+    "yearFrom": 2004,
+    "yearTo": 2011,
+    "engines": [
+     "1.4",
+     "1.6",
+     "1.6 HDi"
+    ]
+   },
+   {
+    "model": "C4",
+    "generation": "II",
+    "yearFrom": 2010,
+    "yearTo": 2018,
+    "engines": [
+     "1.6 VTi",
+     "1.6 THP",
+     "1.6 HDi"
+    ]
+   },
+   {
+    "model": "C5",
+    "yearFrom": 2008,
+    "yearTo": 2017,
+    "engines": [
+     "1.6 THP",
+     "2.0",
+     "2.0 HDi"
+    ]
+   },
+   {
+    "model": "C3",
+    "yearFrom": 2009,
+    "yearTo": 2016,
+    "engines": [
+     "1.4",
+     "1.6",
+     "1.6 HDi"
+    ]
+   },
+   {
+    "model": "Berlingo",
+    "yearFrom": 2008,
+    "engines": [
+     "1.6",
+     "1.6 HDi"
+    ]
+   },
+   {
+    "model": "C4 Picasso",
+    "yearFrom": 2006,
+    "yearTo": 2018,
+    "engines": [
+     "1.6 THP",
+     "2.0 HDi"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Volvo",
+  "ru": "Вольво",
+  "models": [
+   {
+    "model": "XC60",
+    "generation": "I",
+    "yearFrom": 2008,
+    "yearTo": 2017,
+    "engines": [
+     "2.0 T",
+     "2.5 T",
+     "2.4 D5"
+    ]
+   },
+   {
+    "model": "XC60",
+    "generation": "II",
+    "yearFrom": 2017,
+    "engines": [
+     "2.0 T",
+     "2.0 D"
+    ]
+   },
+   {
+    "model": "XC90",
+    "generation": "I",
+    "yearFrom": 2002,
+    "yearTo": 2014,
+    "engines": [
+     "2.5 T",
+     "3.2",
+     "2.4 D5"
+    ]
+   },
+   {
+    "model": "XC90",
+    "generation": "II",
+    "yearFrom": 2014,
+    "engines": [
+     "2.0 T",
+     "2.0 D"
+    ]
+   },
+   {
+    "model": "S60",
+    "yearFrom": 2010,
+    "yearTo": 2018,
+    "engines": [
+     "1.6 T",
+     "2.0 T",
+     "2.4 D5"
+    ]
+   },
+   {
+    "model": "S80",
+    "yearFrom": 2006,
+    "yearTo": 2016,
+    "engines": [
+     "2.5 T",
+     "3.2",
+     "2.4 D5"
+    ]
+   },
+   {
+    "model": "V40",
+    "yearFrom": 2012,
+    "yearTo": 2019,
+    "engines": [
+     "1.6 T",
+     "2.0 T",
+     "2.0 D"
+    ]
+   },
+   {
+    "model": "XC70",
+    "yearFrom": 2007,
+    "yearTo": 2016,
+    "engines": [
+     "3.2",
+     "2.4 D5"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Subaru",
+  "ru": "Субару",
+  "models": [
+   {
+    "model": "Forester",
+    "generation": "SH",
+    "yearFrom": 2008,
+    "yearTo": 2013,
+    "engines": [
+     "2.0",
+     "2.5",
+     "2.5 Turbo"
+    ]
+   },
+   {
+    "model": "Forester",
+    "generation": "SJ",
+    "yearFrom": 2012,
+    "yearTo": 2018,
+    "engines": [
+     "2.0",
+     "2.5",
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "Outback",
+    "yearFrom": 2009,
+    "yearTo": 2014,
+    "engines": [
+     "2.5",
+     "3.6"
+    ]
+   },
+   {
+    "model": "Impreza",
+    "yearFrom": 2007,
+    "yearTo": 2016,
+    "engines": [
+     "1.5",
+     "2.0",
+     "2.5 Turbo"
+    ]
+   },
+   {
+    "model": "Legacy",
+    "yearFrom": 2009,
+    "yearTo": 2014,
+    "engines": [
+     "2.0",
+     "2.5",
+     "3.6"
+    ]
+   },
+   {
+    "model": "XV",
+    "yearFrom": 2011,
+    "yearTo": 2017,
+    "engines": [
+     "1.6",
+     "2.0"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Lexus",
+  "ru": "Лексус",
+  "models": [
+   {
+    "model": "RX",
+    "generation": "III",
+    "yearFrom": 2008,
+    "yearTo": 2015,
+    "engines": [
+     "3.5 V6",
+     "3.5 Hybrid"
+    ]
+   },
+   {
+    "model": "RX",
+    "generation": "IV",
+    "yearFrom": 2015,
+    "engines": [
+     "2.0 Turbo",
+     "3.5 V6",
+     "3.5 Hybrid"
+    ]
+   },
+   {
+    "model": "NX",
+    "yearFrom": 2014,
+    "engines": [
+     "2.0 Turbo",
+     "2.5 Hybrid"
+    ]
+   },
+   {
+    "model": "GX",
+    "yearFrom": 2009,
+    "engines": [
+     "4.6 V8"
+    ]
+   },
+   {
+    "model": "LX",
+    "yearFrom": 2007,
+    "engines": [
+     "4.6 V8",
+     "5.7 V8"
+    ]
+   },
+   {
+    "model": "IS",
+    "yearFrom": 2005,
+    "yearTo": 2013,
+    "engines": [
+     "2.5 V6",
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "ES",
+    "yearFrom": 2012,
+    "engines": [
+     "2.5",
+     "3.5 V6"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Suzuki",
+  "ru": "Сузуки",
+  "models": [
+   {
+    "model": "Grand Vitara",
+    "ru": "Гранд Витара",
+    "yearFrom": 2005,
+    "yearTo": 2015,
+    "engines": [
+     "2.0",
+     "2.4",
+     "1.9 DDiS"
+    ]
+   },
+   {
+    "model": "SX4",
+    "ru": "СХ4",
+    "generation": "I",
+    "yearFrom": 2006,
+    "yearTo": 2014,
+    "engines": [
+     "1.5",
+     "1.6",
+     "2.0"
+    ]
+   },
+   {
+    "model": "Vitara",
+    "ru": "Витара",
+    "yearFrom": 2015,
+    "engines": [
+     "1.4 Turbo",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Swift",
+    "ru": "Свифт",
+    "yearFrom": 2010,
+    "yearTo": 2017,
+    "engines": [
+     "1.2",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Jimny",
+    "ru": "Джимни",
+    "yearFrom": 2018,
+    "engines": [
+     "1.5"
+    ]
+   },
+   {
+    "model": "Liana",
+    "yearFrom": 2001,
+    "yearTo": 2007,
+    "engines": [
+     "1.6"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Daewoo",
+  "ru": "Дэу",
+  "models": [
+   {
+    "model": "Nexia",
+    "ru": "Нексия",
+    "yearFrom": 1995,
+    "yearTo": 2016,
+    "engines": [
+     "1.5 8V",
+     "1.5 16V",
+     "1.6 16V"
+    ]
+   },
+   {
+    "model": "Matiz",
+    "ru": "Матиз",
+    "yearFrom": 1998,
+    "yearTo": 2015,
+    "engines": [
+     "0.8",
+     "1.0"
+    ]
+   },
+   {
+    "model": "Lanos",
+    "ru": "Ланос",
+    "yearFrom": 1997,
+    "yearTo": 2009,
+    "engines": [
+     "1.5"
+    ]
+   },
+   {
+    "model": "Gentra",
+    "ru": "Джентра",
+    "yearFrom": 2013,
+    "yearTo": 2015,
+    "engines": [
+     "1.5"
+    ]
+   },
+   {
+    "model": "Espero",
+    "yearFrom": 1990,
+    "yearTo": 2000,
+    "engines": [
+     "1.5",
+     "1.8",
+     "2.0"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Chery",
+  "ru": "Чери",
+  "models": [
+   {
+    "model": "Tiggo 4",
+    "ru": "Тигго 4",
+    "yearFrom": 2017,
+    "engines": [
+     "1.5",
+     "1.5 Turbo"
+    ]
+   },
+   {
+    "model": "Tiggo 7 Pro",
+    "ru": "Тигго 7 Про",
+    "yearFrom": 2020,
+    "engines": [
+     "1.5 Turbo"
+    ]
+   },
+   {
+    "model": "Tiggo 8 Pro",
+    "ru": "Тигго 8 Про",
+    "yearFrom": 2021,
+    "engines": [
+     "1.6 Turbo",
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "Tiggo 5",
+    "yearFrom": 2014,
+    "yearTo": 2020,
+    "engines": [
+     "1.5 Turbo",
+     "2.0"
+    ]
+   },
+   {
+    "model": "Arrizo 8",
+    "yearFrom": 2022,
+    "engines": [
+     "1.6 Turbo"
+    ]
+   },
+   {
+    "model": "Amulet",
+    "ru": "Амулет",
+    "yearFrom": 2003,
+    "yearTo": 2010,
+    "engines": [
+     "1.5",
+     "1.6"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Geely",
+  "ru": "Джили",
+  "models": [
+   {
+    "model": "Coolray",
+    "ru": "Кулрей",
+    "yearFrom": 2019,
+    "engines": [
+     "1.5 Turbo"
+    ]
+   },
+   {
+    "model": "Atlas",
+    "ru": "Атлас",
+    "yearFrom": 2016,
+    "yearTo": 2022,
+    "engines": [
+     "1.8 Turbo",
+     "2.4"
+    ]
+   },
+   {
+    "model": "Atlas Pro",
+    "yearFrom": 2021,
+    "engines": [
+     "1.5 Turbo"
+    ]
+   },
+   {
+    "model": "Tugella",
+    "ru": "Тугелла",
+    "yearFrom": 2019,
+    "engines": [
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "Emgrand",
+    "ru": "Эмгранд",
+    "yearFrom": 2016,
+    "engines": [
+     "1.5",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Monjaro",
+    "ru": "Монжаро",
+    "yearFrom": 2021,
+    "engines": [
+     "2.0 Turbo"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Haval",
+  "ru": "Хавейл",
+  "models": [
+   {
+    "model": "Jolion",
+    "ru": "Джолион",
+    "yearFrom": 2020,
+    "engines": [
+     "1.5 Turbo"
+    ]
+   },
+   {
+    "model": "F7",
+    "ru": "Ф7",
+    "yearFrom": 2018,
+    "engines": [
+     "1.5 Turbo",
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "F7x",
+    "ru": "Ф7х",
+    "yearFrom": 2019,
+    "engines": [
+     "1.5 Turbo",
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "H9",
+    "ru": "Н9",
+    "yearFrom": 2015,
+    "engines": [
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "Dargo",
+    "ru": "Дарго",
+    "yearFrom": 2021,
+    "engines": [
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "H6",
+    "yearFrom": 2020,
+    "engines": [
+     "1.5 Turbo",
+     "2.0 Turbo"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Great Wall",
+  "ru": "Грейт Волл",
+  "models": [
+   {
+    "model": "Hover H3",
+    "yearFrom": 2010,
+    "yearTo": 2015,
+    "engines": [
+     "2.0",
+     "2.4"
+    ]
+   },
+   {
+    "model": "Hover H5",
+    "yearFrom": 2011,
+    "yearTo": 2015,
+    "engines": [
+     "2.0T",
+     "2.4"
+    ]
+   },
+   {
+    "model": "Wingle",
+    "yearFrom": 2006,
+    "engines": [
+     "2.0T",
+     "2.4"
+    ]
+   },
+   {
+    "model": "Poer",
+    "yearFrom": 2019,
+    "engines": [
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "Safe",
+    "yearFrom": 2002,
+    "yearTo": 2010,
+    "engines": [
+     "2.2",
+     "2.3"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "SsangYong",
+  "ru": "СсангЙонг",
+  "models": [
+   {
+    "model": "Actyon",
+    "yearFrom": 2010,
+    "yearTo": 2018,
+    "engines": [
+     "2.0",
+     "2.0 XDi"
+    ]
+   },
+   {
+    "model": "Kyron",
+    "yearFrom": 2005,
+    "yearTo": 2015,
+    "engines": [
+     "2.3",
+     "2.0 XDi"
+    ]
+   },
+   {
+    "model": "Rexton",
+    "yearFrom": 2001,
+    "engines": [
+     "2.7 XDi",
+     "3.2"
+    ]
+   },
+   {
+    "model": "Korando",
+    "yearFrom": 2010,
+    "engines": [
+     "2.0",
+     "2.0 XDi"
+    ]
+   },
+   {
+    "model": "Tivoli",
+    "yearFrom": 2015,
+    "engines": [
+     "1.6",
+     "1.6 XDi"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Infiniti",
+  "ru": "Инфинити",
+  "models": [
+   {
+    "model": "FX35 / FX37",
+    "yearFrom": 2008,
+    "yearTo": 2013,
+    "engines": [
+     "3.5 V6",
+     "3.7 V6"
+    ]
+   },
+   {
+    "model": "QX70",
+    "yearFrom": 2013,
+    "yearTo": 2017,
+    "engines": [
+     "3.7 V6",
+     "3.0d"
+    ]
+   },
+   {
+    "model": "QX60",
+    "yearFrom": 2013,
+    "engines": [
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "Q50",
+    "yearFrom": 2013,
+    "engines": [
+     "2.0T",
+     "3.0T",
+     "3.5 Hybrid"
+    ]
+   },
+   {
+    "model": "EX / QX50",
+    "yearFrom": 2008,
+    "yearTo": 2017,
+    "engines": [
+     "2.5 V6",
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "G25 / G37",
+    "yearFrom": 2006,
+    "yearTo": 2013,
+    "engines": [
+     "2.5 V6",
+     "3.7 V6"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Land Rover",
+  "ru": "Ленд Ровер",
+  "models": [
+   {
+    "model": "Range Rover",
+    "ru": "Рейндж Ровер",
+    "yearFrom": 2012,
+    "engines": [
+     "3.0 TDV6",
+     "5.0 V8"
+    ]
+   },
+   {
+    "model": "Range Rover Sport",
+    "yearFrom": 2013,
+    "engines": [
+     "3.0 TDV6",
+     "5.0 V8"
+    ]
+   },
+   {
+    "model": "Range Rover Evoque",
+    "yearFrom": 2011,
+    "engines": [
+     "2.0 Si4",
+     "2.0 TD4"
+    ]
+   },
+   {
+    "model": "Discovery",
+    "ru": "Дискавери",
+    "generation": "IV",
+    "yearFrom": 2009,
+    "yearTo": 2016,
+    "engines": [
+     "3.0 TDV6",
+     "5.0 V8"
+    ]
+   },
+   {
+    "model": "Discovery Sport",
+    "yearFrom": 2014,
+    "engines": [
+     "2.0 Si4",
+     "2.0 TD4"
+    ]
+   },
+   {
+    "model": "Freelander 2",
+    "yearFrom": 2006,
+    "yearTo": 2014,
+    "engines": [
+     "3.2 i6",
+     "2.2 TD4"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Jeep",
+  "ru": "Джип",
+  "models": [
+   {
+    "model": "Grand Cherokee",
+    "ru": "Гранд Чероки",
+    "generation": "WK2",
+    "yearFrom": 2010,
+    "yearTo": 2021,
+    "engines": [
+     "3.6 V6",
+     "5.7 V8",
+     "3.0 CRD"
+    ]
+   },
+   {
+    "model": "Wrangler",
+    "ru": "Вранглер",
+    "yearFrom": 2006,
+    "yearTo": 2018,
+    "engines": [
+     "2.8 CRD",
+     "3.6 V6",
+     "3.8 V6"
+    ]
+   },
+   {
+    "model": "Compass",
+    "ru": "Компас",
+    "yearFrom": 2016,
+    "engines": [
+     "1.4 Turbo",
+     "2.0",
+     "2.4"
+    ]
+   },
+   {
+    "model": "Cherokee",
+    "ru": "Чероки",
+    "yearFrom": 2013,
+    "engines": [
+     "2.0",
+     "2.4",
+     "3.2 V6"
+    ]
+   },
+   {
+    "model": "Renegade",
+    "yearFrom": 2014,
+    "engines": [
+     "1.4 Turbo",
+     "2.0 MultiJet"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Fiat",
+  "ru": "Фиат",
+  "models": [
+   {
+    "model": "Punto",
+    "yearFrom": 2005,
+    "yearTo": 2018,
+    "engines": [
+     "1.2",
+     "1.4",
+     "1.3 MultiJet"
+    ]
+   },
+   {
+    "model": "500",
+    "yearFrom": 2007,
+    "engines": [
+     "0.9 TwinAir",
+     "1.2",
+     "1.4"
+    ]
+   },
+   {
+    "model": "Ducato",
+    "yearFrom": 2006,
+    "engines": [
+     "2.3 MultiJet",
+     "3.0 MultiJet"
+    ]
+   },
+   {
+    "model": "Albea",
+    "yearFrom": 2002,
+    "yearTo": 2012,
+    "engines": [
+     "1.4",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Doblo",
+    "yearFrom": 2001,
+    "engines": [
+     "1.4",
+     "1.6",
+     "1.3 MultiJet"
+    ]
+   },
+   {
+    "model": "Bravo",
+    "yearFrom": 2007,
+    "yearTo": 2014,
+    "engines": [
+     "1.4",
+     "1.6 MultiJet"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Seat",
+  "ru": "Сеат",
+  "models": [
+   {
+    "model": "Leon",
+    "generation": "II",
+    "yearFrom": 2005,
+    "yearTo": 2012,
+    "engines": [
+     "1.4 TSI",
+     "1.8 TSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Leon",
+    "generation": "III",
+    "yearFrom": 2012,
+    "yearTo": 2020,
+    "engines": [
+     "1.2 TSI",
+     "1.4 TSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Ibiza",
+    "yearFrom": 2008,
+    "yearTo": 2017,
+    "engines": [
+     "1.2 TSI",
+     "1.4",
+     "1.6 TDI"
+    ]
+   },
+   {
+    "model": "Ateca",
+    "yearFrom": 2016,
+    "engines": [
+     "1.4 TSI",
+     "2.0 TDI"
+    ]
+   },
+   {
+    "model": "Toledo",
+    "yearFrom": 2012,
+    "yearTo": 2019,
+    "engines": [
+     "1.2 TSI",
+     "1.6 TDI"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "MINI",
+  "ru": "Мини",
+  "models": [
+   {
+    "model": "Hatch",
+    "generation": "R56",
+    "yearFrom": 2006,
+    "yearTo": 2013,
+    "engines": [
+     "1.4",
+     "1.6",
+     "1.6 Turbo"
+    ]
+   },
+   {
+    "model": "Hatch",
+    "generation": "F56",
+    "yearFrom": 2013,
+    "engines": [
+     "1.2 Turbo",
+     "1.5 Turbo",
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "Countryman",
+    "generation": "R60",
+    "yearFrom": 2010,
+    "yearTo": 2016,
+    "engines": [
+     "1.6",
+     "1.6 Turbo",
+     "2.0d"
+    ]
+   },
+   {
+    "model": "Countryman",
+    "generation": "F60",
+    "yearFrom": 2017,
+    "engines": [
+     "1.5 Turbo",
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "Clubman",
+    "yearFrom": 2007,
+    "engines": [
+     "1.6",
+     "2.0 Turbo"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Porsche",
+  "ru": "Порше",
+  "models": [
+   {
+    "model": "Cayenne",
+    "generation": "955/957",
+    "yearFrom": 2002,
+    "yearTo": 2010,
+    "engines": [
+     "3.6 V6",
+     "4.5 V8",
+     "4.8 V8"
+    ]
+   },
+   {
+    "model": "Cayenne",
+    "generation": "958",
+    "yearFrom": 2010,
+    "yearTo": 2017,
+    "engines": [
+     "3.0 TDI",
+     "3.6 V6",
+     "4.8 V8"
+    ]
+   },
+   {
+    "model": "Macan",
+    "yearFrom": 2014,
+    "engines": [
+     "2.0 Turbo",
+     "3.0 V6",
+     "3.6 V6"
+    ]
+   },
+   {
+    "model": "Panamera",
+    "yearFrom": 2009,
+    "engines": [
+     "3.0 V6",
+     "4.8 V8"
+    ]
+   },
+   {
+    "model": "911",
+    "generation": "997",
+    "yearFrom": 2004,
+    "yearTo": 2012,
+    "engines": [
+     "3.6",
+     "3.8"
+    ]
+   },
+   {
+    "model": "Cayman",
+    "yearFrom": 2005,
+    "engines": [
+     "2.7",
+     "3.4"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Datsun",
+  "ru": "Датсун",
+  "models": [
+   {
+    "model": "on-DO",
+    "ru": "он-ДО",
+    "yearFrom": 2014,
+    "yearTo": 2020,
+    "engines": [
+     "1.6 8V",
+     "1.6 16V"
+    ]
+   },
+   {
+    "model": "mi-DO",
+    "ru": "ми-ДО",
+    "yearFrom": 2015,
+    "yearTo": 2020,
+    "engines": [
+     "1.6 8V",
+     "1.6 16V"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Ravon",
+  "ru": "Равон",
+  "models": [
+   {
+    "model": "R2",
+    "ru": "Р2",
+    "yearFrom": 2016,
+    "yearTo": 2020,
+    "engines": [
+     "1.2"
+    ]
+   },
+   {
+    "model": "R4",
+    "ru": "Р4",
+    "yearFrom": 2016,
+    "yearTo": 2020,
+    "engines": [
+     "1.5"
+    ]
+   },
+   {
+    "model": "Nexia R3",
+    "ru": "Нексия Р3",
+    "yearFrom": 2016,
+    "yearTo": 2020,
+    "engines": [
+     "1.5"
+    ]
+   },
+   {
+    "model": "Gentra",
+    "ru": "Джентра",
+    "yearFrom": 2016,
+    "yearTo": 2020,
+    "engines": [
+     "1.5"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Cadillac",
+  "ru": "Кадиллак",
+  "models": [
+   {
+    "model": "Escalade",
+    "yearFrom": 2006,
+    "engines": [
+     "6.0 V8",
+     "6.2 V8"
+    ]
+   },
+   {
+    "model": "CTS",
+    "yearFrom": 2007,
+    "yearTo": 2019,
+    "engines": [
+     "2.0T",
+     "3.6 V6"
+    ]
+   },
+   {
+    "model": "SRX",
+    "yearFrom": 2009,
+    "yearTo": 2016,
+    "engines": [
+     "3.0 V6",
+     "3.6 V6"
+    ]
+   },
+   {
+    "model": "XT5",
+    "yearFrom": 2016,
+    "engines": [
+     "3.6 V6"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Dodge",
+  "ru": "Додж",
+  "models": [
+   {
+    "model": "Ram 1500",
+    "yearFrom": 2008,
+    "engines": [
+     "3.6 V6",
+     "5.7 V8"
+    ]
+   },
+   {
+    "model": "Journey",
+    "yearFrom": 2008,
+    "yearTo": 2020,
+    "engines": [
+     "2.4",
+     "3.6 V6"
+    ]
+   },
+   {
+    "model": "Caliber",
+    "yearFrom": 2006,
+    "yearTo": 2011,
+    "engines": [
+     "1.8",
+     "2.0",
+     "2.4"
+    ]
+   },
+   {
+    "model": "Charger",
+    "yearFrom": 2011,
+    "engines": [
+     "3.6 V6",
+     "5.7 V8"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Chrysler",
+  "ru": "Крайслер",
+  "models": [
+   {
+    "model": "300C",
+    "yearFrom": 2004,
+    "engines": [
+     "3.5 V6",
+     "5.7 V8",
+     "3.0 CRD"
+    ]
+   },
+   {
+    "model": "Sebring",
+    "yearFrom": 2007,
+    "yearTo": 2010,
+    "engines": [
+     "2.4",
+     "2.7 V6"
+    ]
+   },
+   {
+    "model": "Voyager",
+    "yearFrom": 2001,
+    "yearTo": 2016,
+    "engines": [
+     "2.4",
+     "2.8 CRD",
+     "3.3 V6"
+    ]
+   },
+   {
+    "model": "PT Cruiser",
+    "yearFrom": 2000,
+    "yearTo": 2010,
+    "engines": [
+     "1.6",
+     "2.0",
+     "2.4"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Jaguar",
+  "ru": "Ягуар",
+  "models": [
+   {
+    "model": "XF",
+    "yearFrom": 2007,
+    "engines": [
+     "2.0",
+     "3.0 V6",
+     "2.2d",
+     "3.0d"
+    ]
+   },
+   {
+    "model": "XE",
+    "yearFrom": 2015,
+    "engines": [
+     "2.0",
+     "2.0d"
+    ]
+   },
+   {
+    "model": "F-Pace",
+    "yearFrom": 2016,
+    "engines": [
+     "2.0",
+     "3.0 V6",
+     "2.0d"
+    ]
+   },
+   {
+    "model": "XJ",
+    "yearFrom": 2009,
+    "yearTo": 2019,
+    "engines": [
+     "3.0 V6",
+     "5.0 V8",
+     "3.0d"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Acura",
+  "ru": "Акура",
+  "models": [
+   {
+    "model": "MDX",
+    "yearFrom": 2006,
+    "engines": [
+     "3.5 V6",
+     "3.7 V6"
+    ]
+   },
+   {
+    "model": "RDX",
+    "yearFrom": 2006,
+    "engines": [
+     "2.3 Turbo",
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "TLX",
+    "yearFrom": 2014,
+    "engines": [
+     "2.4",
+     "3.5 V6"
+    ]
+   },
+   {
+    "model": "TSX",
+    "yearFrom": 2003,
+    "yearTo": 2014,
+    "engines": [
+     "2.4",
+     "3.5 V6"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Genesis",
+  "ru": "Дженесис",
+  "models": [
+   {
+    "model": "G70",
+    "yearFrom": 2017,
+    "engines": [
+     "2.0T",
+     "3.3 T-GDI"
+    ]
+   },
+   {
+    "model": "G80",
+    "yearFrom": 2016,
+    "engines": [
+     "2.5T",
+     "3.5 T-GDI"
+    ]
+   },
+   {
+    "model": "GV70",
+    "yearFrom": 2020,
+    "engines": [
+     "2.5T",
+     "3.5 T-GDI"
+    ]
+   },
+   {
+    "model": "GV80",
+    "yearFrom": 2020,
+    "engines": [
+     "2.5T",
+     "3.5 T-GDI"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Alfa Romeo",
+  "ru": "Альфа Ромео",
+  "models": [
+   {
+    "model": "Giulietta",
+    "yearFrom": 2010,
+    "yearTo": 2020,
+    "engines": [
+     "1.4 TB",
+     "1.6 JTDM",
+     "2.0 JTDM"
+    ]
+   },
+   {
+    "model": "Giulia",
+    "yearFrom": 2016,
+    "engines": [
+     "2.0 Turbo",
+     "2.2 JTDM"
+    ]
+   },
+   {
+    "model": "Stelvio",
+    "yearFrom": 2016,
+    "engines": [
+     "2.0 Turbo",
+     "2.2 JTDM"
+    ]
+   },
+   {
+    "model": "159",
+    "yearFrom": 2005,
+    "yearTo": 2011,
+    "engines": [
+     "1.9 JTS",
+     "2.2 JTS",
+     "1.9 JTDM"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Tesla",
+  "ru": "Тесла",
+  "models": [
+   {
+    "model": "Model 3",
+    "yearFrom": 2017,
+    "engines": [
+     "Electric"
+    ]
+   },
+   {
+    "model": "Model Y",
+    "yearFrom": 2020,
+    "engines": [
+     "Electric"
+    ]
+   },
+   {
+    "model": "Model S",
+    "yearFrom": 2012,
+    "engines": [
+     "Electric"
+    ]
+   },
+   {
+    "model": "Model X",
+    "yearFrom": 2015,
+    "engines": [
+     "Electric"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Dacia",
+  "ru": "Дачия",
+  "models": [
+   {
+    "model": "Duster",
+    "ru": "Дастер",
+    "yearFrom": 2010,
+    "engines": [
+     "1.6",
+     "1.3 TCe",
+     "1.5 dCi"
+    ]
+   },
+   {
+    "model": "Logan",
+    "ru": "Логан",
+    "yearFrom": 2004,
+    "engines": [
+     "1.2",
+     "1.6",
+     "1.5 dCi"
+    ]
+   },
+   {
+    "model": "Sandero",
+    "ru": "Сандеро",
+    "yearFrom": 2008,
+    "engines": [
+     "0.9 TCe",
+     "1.6",
+     "1.5 dCi"
+    ]
+   },
+   {
+    "model": "Lodgy",
+    "yearFrom": 2012,
+    "engines": [
+     "1.6",
+     "1.5 dCi"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Changan",
+  "ru": "Чанган",
+  "models": [
+   {
+    "model": "CS35 Plus",
+    "yearFrom": 2018,
+    "engines": [
+     "1.6"
+    ]
+   },
+   {
+    "model": "CS55 Plus",
+    "yearFrom": 2019,
+    "engines": [
+     "1.5 Turbo"
+    ]
+   },
+   {
+    "model": "CS75 Plus",
+    "yearFrom": 2019,
+    "engines": [
+     "1.5 Turbo",
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "UNI-K",
+    "yearFrom": 2020,
+    "engines": [
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "Eado",
+    "yearFrom": 2012,
+    "engines": [
+     "1.6"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "JAC",
+  "ru": "ДжАК",
+  "models": [
+   {
+    "model": "S3",
+    "yearFrom": 2014,
+    "engines": [
+     "1.5",
+     "1.6"
+    ]
+   },
+   {
+    "model": "S5",
+    "yearFrom": 2013,
+    "engines": [
+     "1.5 Turbo",
+     "2.0"
+    ]
+   },
+   {
+    "model": "S7",
+    "yearFrom": 2018,
+    "engines": [
+     "1.5 Turbo"
+    ]
+   },
+   {
+    "model": "JS4",
+    "yearFrom": 2021,
+    "engines": [
+     "1.5 Turbo"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "BYD",
+  "ru": "БИД",
+  "models": [
+   {
+    "model": "Song Plus",
+    "yearFrom": 2020,
+    "engines": [
+     "1.5 Turbo",
+     "Electric"
+    ]
+   },
+   {
+    "model": "Han",
+    "yearFrom": 2020,
+    "engines": [
+     "Electric"
+    ]
+   },
+   {
+    "model": "Tang",
+    "yearFrom": 2018,
+    "engines": [
+     "2.0 Turbo",
+     "Electric"
+    ]
+   },
+   {
+    "model": "F3",
+    "yearFrom": 2005,
+    "yearTo": 2016,
+    "engines": [
+     "1.5",
+     "1.6"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Exeed",
+  "ru": "Эксид",
+  "models": [
+   {
+    "model": "TXL",
+    "yearFrom": 2019,
+    "engines": [
+     "1.6 Turbo",
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "VX",
+    "yearFrom": 2020,
+    "engines": [
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "LX",
+    "yearFrom": 2018,
+    "engines": [
+     "1.5 Turbo",
+     "1.6 Turbo"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Omoda",
+  "ru": "Омода",
+  "models": [
+   {
+    "model": "C5",
+    "yearFrom": 2022,
+    "engines": [
+     "1.5 Turbo"
+    ]
+   },
+   {
+    "model": "S5",
+    "yearFrom": 2022,
+    "engines": [
+     "1.5"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Moskvich",
+  "ru": "Москвич",
+  "models": [
+   {
+    "model": "3",
+    "yearFrom": 2022,
+    "engines": [
+     "1.5 Turbo"
+    ]
+   },
+   {
+    "model": "2141",
+    "yearFrom": 1986,
+    "yearTo": 2003,
+    "engines": [
+     "1.5",
+     "1.6",
+     "1.7",
+     "2.0"
+    ]
+   },
+   {
+    "model": "412",
+    "yearFrom": 1967,
+    "yearTo": 1998,
+    "engines": [
+     "1.5"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Isuzu",
+  "ru": "Исузу",
+  "models": [
+   {
+    "model": "D-Max",
+    "yearFrom": 2011,
+    "engines": [
+     "2.5 Turbo",
+     "3.0 Turbo"
+    ]
+   },
+   {
+    "model": "MU-X",
+    "yearFrom": 2013,
+    "engines": [
+     "1.9 Turbo",
+     "3.0 Turbo"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Tank",
+  "ru": "Танк",
+  "models": [
+   {
+    "model": "300",
+    "yearFrom": 2020,
+    "engines": [
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "500",
+    "yearFrom": 2021,
+    "engines": [
+     "3.0 V6 Turbo"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Lifan",
+  "ru": "Лифан",
+  "models": [
+   {
+    "model": "Solano",
+    "yearFrom": 2008,
+    "yearTo": 2016,
+    "engines": [
+     "1.5",
+     "1.6"
+    ]
+   },
+   {
+    "model": "X60",
+    "yearFrom": 2011,
+    "yearTo": 2018,
+    "engines": [
+     "1.8"
+    ]
+   },
+   {
+    "model": "Smily",
+    "yearFrom": 2008,
+    "yearTo": 2014,
+    "engines": [
+     "1.3"
+    ]
+   },
+   {
+    "model": "X50",
+    "yearFrom": 2015,
+    "yearTo": 2018,
+    "engines": [
+     "1.5"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "FAW",
+  "ru": "ФАВ",
+  "models": [
+   {
+    "model": "Besturn X80",
+    "yearFrom": 2013,
+    "engines": [
+     "2.0",
+     "1.8 Turbo"
+    ]
+   },
+   {
+    "model": "Bestune T77",
+    "yearFrom": 2018,
+    "engines": [
+     "1.2 Turbo",
+     "1.5 Turbo"
+    ]
+   },
+   {
+    "model": "Bestune T99",
+    "yearFrom": 2019,
+    "engines": [
+     "2.0 Turbo"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "GAC",
+  "ru": "ГАК",
+  "models": [
+   {
+    "model": "GS3",
+    "yearFrom": 2017,
+    "engines": [
+     "1.5"
+    ]
+   },
+   {
+    "model": "GS8",
+    "yearFrom": 2016,
+    "engines": [
+     "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "GN8",
+    "yearFrom": 2016,
+    "engines": [
+     "2.0 Turbo"
+    ]
+   }
+  ]
+ }
+]

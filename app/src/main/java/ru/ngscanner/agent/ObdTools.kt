@@ -71,5 +71,16 @@ object ObdTools {
                 "пользователя в приложении перед выполнением.",
             parametersJsonSchema = NO_ARGS,
         ),
+        ToolSpec(
+            name = "save_to_logbook",
+            description = "Сохранить важный вывод, диагноз или наблюдение в бортжурнал активного " +
+                "автомобиля, чтобы учесть это при будущих диагностиках. Пиши кратко и по делу — " +
+                "только подтверждённые находки, одна мысль на запись.",
+            parametersJsonSchema = """
+                {"type":"object","properties":{
+                  "note":{"type":"string","description":"Краткая запись, например: подтверждён пропуск воспламенения в 3-м цилиндре, вероятна катушка зажигания"}},
+                "required":["note"],"additionalProperties":false}
+            """.trimIndent(),
+        ),
     )
 }

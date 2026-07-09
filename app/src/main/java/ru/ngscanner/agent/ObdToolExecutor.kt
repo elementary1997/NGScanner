@@ -19,10 +19,19 @@ import ru.ngscanner.obd.ObdPid
 class ObdToolExecutor(
     private val elm: Elm327?,
     private val allowClearDtcs: () -> Boolean = { false },
+    private val saveNote: (String) -> Boolean = { false },
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun execute(call: ToolCall): ToolResult {
+        // Запись в бортжурнал не требует адаптера — обрабатываем до проверки связи.
+        if (call.name == "save_to_logbook") {
+            return try {
+                ToolResult(call.id, saveToLogbook(call.argumentsJson))
+            } catch (ex: Exception) {
+                ToolResult(call.id, "Ошибка сохранения записи: ${ex.message}", isError = true)
+            }
+        }
         val e = elm ?: return ToolResult(
             call.id,
             "Адаптер ELM327 не подключён. Подключитесь на вкладке «Приборы».",
@@ -32,6 +41,18 @@ class ObdToolExecutor(
             ToolResult(call.id, runTool(e, call))
         } catch (ex: Exception) {
             ToolResult(call.id, "Ошибка выполнения инструмента: ${ex.message}", isError = true)
+        }
+    }
+
+    private fun saveToLogbook(argsJson: String): String {
+        val note = runCatching {
+            json.parseToJsonElement(argsJson).jsonObject["note"]?.jsonPrimitive?.content
+        }.getOrNull()
+        if (note.isNullOrBlank()) return "Пустая запись — нечего сохранять."
+        return if (saveNote(note)) {
+            "Записано в бортжурнал."
+        } else {
+            "Активный автомобиль не выбран — запись не сохранена. Предложи пользователю добавить машину в «Гараж»."
         }
     }
 

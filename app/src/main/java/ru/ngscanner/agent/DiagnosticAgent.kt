@@ -24,14 +24,16 @@ class DiagnosticAgent(
         userMessage: String,
         images: List<LlmImage>,
         history: List<LlmMessage>,
+        carContext: String? = null,
         onEvent: (AgentEvent) -> Unit,
     ): List<LlmMessage> {
         val messages = history.toMutableList()
         messages.add(LlmMessage(Role.USER, content = userMessage, images = images))
+        val system = if (carContext.isNullOrBlank()) SYSTEM_PROMPT else "$SYSTEM_PROMPT\n\n$carContext"
 
         var steps = 0
         while (steps++ < MAX_STEPS) {
-            val response = provider.send(LlmRequest(model, SYSTEM_PROMPT, messages, ObdTools.all))
+            val response = provider.send(LlmRequest(model, system, messages, ObdTools.all))
             when (response) {
                 is LlmResponse.Final -> {
                     messages.add(LlmMessage(Role.ASSISTANT, content = response.text))
@@ -68,7 +70,13 @@ class DiagnosticAgent(
                 "Если пользователь не указал иное — начинай с чтения активных кодов неисправностей. " +
                 "Инструмент clear_dtcs (сброс кодов) вызывай только если пользователь явно просит " +
                 "сбросить коды; он требует отдельного подтверждения в приложении.\n\n" +
-                "Не выдумывай коды и значения — опирайся только на данные, полученные инструментами."
+                "Когда сформулировал вердикт или заметил важный факт по этой машине — сохрани его " +
+                "кратко инструментом save_to_logbook, чтобы учесть при будущих диагностиках. Не " +
+                "дублируй уже имеющиеся записи из контекста автомобиля.\n\n" +
+                "Не выдумывай коды и значения — опирайся только на данные, полученные инструментами.\n\n" +
+                "Форматирование: экран телефона узкий. Не строй широких таблиц — максимум 2 столбца " +
+                "(например «Параметр | Значение»), с короткими заголовками. Если данных много, " +
+                "используй маркированный список, а не таблицу."
     }
 }
 
