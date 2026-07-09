@@ -42,6 +42,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +65,9 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 fun MainScreen(vm: MainViewModel) {
     val ui by vm.ui.collectAsState()
     var tab by rememberSaveable { mutableStateOf(Tab.Devices) }
+    // Держит per-вкладку сохраняемое состояние: черновики форм, стек навигации
+    // Гаража и прокрутка не сбрасываются при переключении вкладок.
+    val tabStateHolder = rememberSaveableStateHolder()
 
     val permissions = bluetoothPermissions()
     val launcher = rememberLauncherForActivityResult(
@@ -118,25 +122,27 @@ fun MainScreen(vm: MainViewModel) {
                 .padding(padding)
                 .consumeWindowInsets(padding),
         ) {
-            when (tab) {
-                Tab.Devices -> DevicesTab(
-                    ui = ui,
-                    onScan = { launcher.launch(permissions); vm.refreshDevices(); vm.startScan() },
-                    onStopScan = vm::stopScan,
-                    onConnect = vm::connect,
-                    onDisconnect = vm::disconnect,
-                    onRequestNorm = vm::requestNorm,
-                )
-                Tab.Chat -> ChatTab(
-                    ui,
-                    onSend = vm::sendMessage,
-                    onClear = vm::clearChat,
-                    onCancel = vm::cancelDiagnosis,
-                    onLocalDiagnose = vm::localDiagnose,
-                    onRestore = vm::restoreSession,
-                )
-                Tab.Garage -> GarageTab(ui, vm)
-                Tab.Settings -> SettingsTab(ui, vm)
+            tabStateHolder.SaveableStateProvider(tab) {
+                when (tab) {
+                    Tab.Devices -> DevicesTab(
+                        ui = ui,
+                        onScan = { launcher.launch(permissions); vm.refreshDevices(); vm.startScan() },
+                        onStopScan = vm::stopScan,
+                        onConnect = vm::connect,
+                        onDisconnect = vm::disconnect,
+                        onRequestNorm = vm::requestNorm,
+                    )
+                    Tab.Chat -> ChatTab(
+                        ui,
+                        onSend = vm::sendMessage,
+                        onClear = vm::clearChat,
+                        onCancel = vm::cancelDiagnosis,
+                        onLocalDiagnose = vm::localDiagnose,
+                        onRestore = vm::restoreSession,
+                    )
+                    Tab.Garage -> GarageTab(ui, vm)
+                    Tab.Settings -> SettingsTab(ui, vm)
+                }
             }
         }
     }
@@ -173,9 +179,17 @@ private fun ClearDtcsDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
 
 @Composable
 private fun bluetoothPermissions(): Array<String> = remember {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
-    } else {
-        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-    }
+    buildList {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            add(Manifest.permission.BLUETOOTH_CONNECT)
+            add(Manifest.permission.BLUETOOTH_SCAN)
+        } else {
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        // Android 13+: без этого разрешения ongoing-уведомление foreground-сервиса
+        // (предупреждение о риске разряда АКБ подключённым адаптером) подавляется.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }.toTypedArray()
 }

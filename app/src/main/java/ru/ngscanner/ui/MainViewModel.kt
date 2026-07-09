@@ -6,8 +6,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -88,6 +90,8 @@ data class UiState(
     val testing: Boolean = false,
     val testStatus: TestStatus? = null,
     val availableModels: List<LlmModel> = emptyList(),
+    // ключи хранятся в зашифрованном виде (false — редкий фолбэк на plaintext)
+    val keysEncrypted: Boolean = true,
     // гараж
     val garage: Garage = Garage(),
     val carSuggestions: List<VehicleSuggestion> = emptyList(),
@@ -117,6 +121,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var elm: Elm327? = null
     private var pollJob: Job? = null
     private var diagnoseJob: Job? = null
+    private var searchJob: Job? = null
     private var clearConfirm: CompletableDeferred<Boolean>? = null
     private var supportedPids: Set<String> = emptySet()
     private var lastAddress: String? = null
@@ -134,6 +139,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 modelNorms = garage.activeCar?.let { c -> normsRepo.normsFor(c.id) } ?: emptyMap(),
                 chat = chatRepo.loadChat(),
                 sessions = chatRepo.sessions(),
+                keysEncrypted = settings.encrypted,
             )
         },
     )
@@ -184,9 +190,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         controller.cancelDiscovery()
         _ui.update { it.copy(connection = ConnectionState.Connecting, error = null, scanning = false) }
         viewModelScope.launch {
+            var fresh: ClassicSppTransport? = null
             try {
                 val t = ClassicSppTransport(device)
                 t.connect()
+                fresh = t
                 val e = Elm327(t)
                 e.initialize()
                 supportedPids = runCatching { e.readSupportedPids() }.getOrDefault(emptySet())
@@ -199,7 +207,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 startPolling()
             } catch (ex: Exception) {
-                transport?.close()
+                // Закрываем именно свежий сокет: если init упал уже после connect(),
+                // дешёвый клон держит RFCOMM занятым и следующие подключения падают.
+                fresh?.close()
                 transport = null
                 elm = null
                 _ui.update { it.copy(connection = ConnectionState.Disconnected, error = ex.message) }
@@ -228,7 +238,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         values.forEach { (pid, v) ->
                             history[pid] = ((history[pid] ?: emptyList()) + v).takeLast(HISTORY_SIZE)
                         }
-                        state.copy(metrics = values, history = history)
+                        // Мержим, а не заменяем: промах одного PID (норма для ELM327)
+                        // не должен гасить остальные приборы в «—» до следующего цикла.
+                        state.copy(metrics = state.metrics + values, history = history)
                     }
                     emptyStreak = 0
                     lastDataAt = System.currentTimeMillis()
@@ -297,17 +309,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 delay(delayMs)
                 if (!reconnecting) return@launch
                 val device = controller.deviceByAddress(address)
+                var fresh: ClassicSppTransport? = null
                 val ok = device != null && runCatching {
                     transport?.close()
                     val t = ClassicSppTransport(device)
                     t.connect()
+                    fresh = t
                     val e = Elm327(t)
                     e.initialize()
                     supportedPids = runCatching { e.readSupportedPids() }.getOrDefault(emptySet())
                     transport = t
                     elm = e
                     true
-                }.getOrDefault(false)
+                }.getOrElse {
+                    // Сбой init/чтения после connect() — закрываем свежий сокет, иначе
+                    // занятый канал гарантированно проваливает остальные попытки.
+                    fresh?.close()
+                    false
+                }
                 if (ok) {
                     reconnecting = false
                     _ui.update {
@@ -363,13 +382,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         stopPolling()
         diagnoseJob = viewModelScope.launch {
             try {
-                llmHistory = agent.run(text, images, llmHistory, carContext(), adapterConnected = elm != null) { event ->
+                llmHistory = trimLlmHistory(agent.run(text, images, llmHistory, carContext(), adapterConnected = elm != null) { event ->
                     val msg = when (event) {
                         is AgentEvent.Assistant -> ChatMessage(ChatRole.ASSISTANT, event.text)
                         is AgentEvent.ToolCall -> ChatMessage(ChatRole.TOOL, toolStatusText(event.name))
                     }
                     appendChat(msg)
-                }
+                })
             } catch (ex: CancellationException) {
                 appendChat(ChatMessage(ChatRole.SYSTEM, "Диагностика прервана."))
                 throw ex
@@ -460,6 +479,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         clearConfirm = null
     }
 
+    /**
+     * Ограничивает историю для модели, чтобы она не росла без предела (стоимость
+     * и переполнение контекста). Отрезаем старое, но начинаем с хода пользователя
+     * — иначе разрыв пары tool_use/tool_result вызовет 400 у провайдера.
+     */
+    private fun trimLlmHistory(history: List<LlmMessage>): List<LlmMessage> {
+        if (history.size <= MAX_HISTORY_MSGS) return history
+        var start = history.size - MAX_HISTORY_MSGS
+        while (start < history.size && history[start].role != Role.USER) start++
+        return if (start >= history.size) history.takeLast(MAX_HISTORY_MSGS) else history.drop(start)
+    }
+
     private fun errorMessage(ex: Throwable): String =
         (ex as? LlmException ?: LlmException.from(ex)).userMessage()
 
@@ -532,10 +563,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Гараж ----
 
     fun searchCars(query: String) {
-        viewModelScope.launch {
-            val suggestions = if (query.isBlank()) {
-                emptyList()
-            } else {
+        searchJob?.cancel()
+        if (query.isBlank()) {
+            _ui.update { it.copy(carSuggestions = emptyList()) }
+            return
+        }
+        searchJob = viewModelScope.launch {
+            delay(SEARCH_DEBOUNCE_MS) // не ищем на каждое нажатие — ждём паузу ввода
+            // Разбор каталога из assets — не на главном потоке.
+            val suggestions = withContext(Dispatchers.IO) {
                 runCatching { VehicleCatalog.search(getApplication(), query, limit = 12) }.getOrDefault(emptyList())
             }
             _ui.update { it.copy(carSuggestions = suggestions) }
@@ -646,6 +682,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(garage = garageRepo.addEntry(car.id, entry)) }
     }
 
+    /** Удаляет запись [entryId] из журнала машины [carId]. */
+    fun deleteLogEntry(carId: String, entryId: String) {
+        _ui.update { it.copy(garage = garageRepo.deleteEntry(carId, entryId)) }
+    }
+
     /** Запись, которую агент сам сохраняет в бортжурнал (`bySystem = true`). */
     private fun addSystemLogEntry(text: String): Boolean {
         val car = _ui.value.garage.activeCar ?: return false
@@ -717,8 +758,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
             } catch (ex: Exception) {
+                // Не показываем сырое английское тело ошибки — только понятный текст.
                 _ui.update {
-                    it.copy(testing = false, testStatus = TestStatus.Error(ex.message ?: "ошибка подключения"))
+                    it.copy(testing = false, testStatus = TestStatus.Error(errorMessage(ex)))
                 }
             }
         }
@@ -740,5 +782,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private const val RECONNECT_BASE_MS = 2000L
         private const val RECONNECT_MAX_MS = 16000L
         private const val HISTORY_SIZE = 60
+        private const val MAX_HISTORY_MSGS = 40
+        private const val SEARCH_DEBOUNCE_MS = 250L
     }
 }

@@ -80,6 +80,8 @@ data class Car(
 data class Garage(
     val cars: List<Car> = emptyList(),
     val activeCarId: String? = null,
+    // Версия схемы хранения: позволяет будущим миграциям распознать старые данные.
+    val schemaVersion: Int = 1,
 ) {
     /**
      * Активная машина, найденная по [activeCarId], либо null,

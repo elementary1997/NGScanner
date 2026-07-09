@@ -148,8 +148,13 @@ internal fun SettingsTab(ui: UiState, vm: MainViewModel) {
 
         InfoCard(
             Icons.Rounded.ErrorOutline,
-            "Ключ хранится в зашифрованном виде только на устройстве. " +
-                "Claude — console.anthropic.com; Cloud.ru — личный кабинет (сервисный аккаунт).",
+            if (ui.keysEncrypted) {
+                "Ключ хранится в зашифрованном виде только на устройстве. " +
+                    "Claude — console.anthropic.com; Cloud.ru — личный кабинет (сервисный аккаунт)."
+            } else {
+                "⚠️ Шифрованное хранилище недоступно на этом устройстве — ключ хранится без " +
+                    "шифрования в приватных данных приложения. Будьте осторожны на устройствах с root."
+            },
         )
         InfoCard(
             Icons.Rounded.Info,

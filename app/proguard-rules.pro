@@ -7,3 +7,17 @@
 -keepattributes *Annotation*, InnerClasses
 -dontnote kotlinx.serialization.**
 -keepclassmembers class **$$serializer { *; }
+# @Serializable-модели приложения (гараж, чат, LLM-сообщения) и их сериализаторы.
+-keepclassmembers @kotlinx.serialization.Serializable class ru.ngscanner.** {
+    *** Companion;
+    <fields>;
+}
+-keep class ru.ngscanner.**$Companion { *; }
+
+# Google Tink — движок EncryptedSharedPreferences (security-crypto). Без keep
+# R8 вырежет key-manager'ы, зарегистрированные рефлексией, и шифрованное
+# хранилище ключей упадёт при старте.
+-keep class com.google.crypto.tink.** { *; }
+-keep class * extends com.google.crypto.tink.shaded.protobuf.GeneratedMessageLite { <fields>; }
+-keepclassmembers class * extends com.google.crypto.tink.shaded.protobuf.GeneratedMessageLite { <fields>; }
+-dontwarn com.google.crypto.tink.**

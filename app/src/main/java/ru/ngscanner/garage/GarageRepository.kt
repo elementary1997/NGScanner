@@ -29,7 +29,15 @@ class GarageRepository(context: android.content.Context) {
      */
     fun load(): Garage {
         val raw = prefs.getString(KEY_GARAGE, null) ?: return Garage()
-        return runCatching { json.decodeFromString<Garage>(raw) }.getOrElse { Garage() }
+        return runCatching { json.decodeFromString<Garage>(raw) }.getOrElse {
+            // Не удалось разобрать (повреждение/несовместимая схема). Сохраняем сырой
+            // JSON в резервный ключ, чтобы следующая запись его не затёрла и данные
+            // можно было восстановить — иначе одна ошибка навсегда стирает гараж.
+            if (prefs.getString(KEY_GARAGE_BACKUP, null) == null) {
+                prefs.edit().putString(KEY_GARAGE_BACKUP, raw).apply()
+            }
+            Garage()
+        }
     }
 
     /**
@@ -80,6 +88,12 @@ class GarageRepository(context: android.content.Context) {
         updateCar(carId) { car -> car.copy(log = listOf(entry) + car.log) }
 
     /**
+     * Удаляет запись журнала [entryId] у машины [carId].
+     */
+    fun deleteEntry(carId: String, entryId: String): Garage =
+        updateCar(carId) { car -> car.copy(log = car.log.filterNot { it.id == entryId }) }
+
+    /**
      * Общий помощник: применяет [transform] к машине с [carId] и персистит
      * результат. Если машина не найдена — гараж не меняется.
      */
@@ -102,6 +116,9 @@ class GarageRepository(context: android.content.Context) {
 
         /** Ключ, под которым лежит JSON гаража. */
         const val KEY_GARAGE = "garage"
+
+        /** Резервная копия сырого JSON при ошибке разбора (защита от потери данных). */
+        const val KEY_GARAGE_BACKUP = "garage_backup_raw"
 
         /** Генерирует новый id для машины. */
         fun newCarId(): String = UUID.randomUUID().toString()

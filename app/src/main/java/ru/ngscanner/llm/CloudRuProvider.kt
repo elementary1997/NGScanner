@@ -1,6 +1,9 @@
 package ru.ngscanner.llm
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArrayBuilder
@@ -18,6 +21,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -63,10 +67,20 @@ class CloudRuProvider(
             .addHeader("Content-Type", "application/json")
             .post(buildBody(request).toString().toRequestBody(JSON_MEDIA))
             .build()
-        http.newCall(httpReq).execute().use { resp ->
-            val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw LlmException.fromHttp(resp.code, text)
-            parseResponse(text)
+        val call = http.newCall(httpReq)
+        // Отмена корутины отменяет HTTP-вызов: прерывает retry-сон и не даёт слать платные запросы.
+        val handle = coroutineContext[Job]?.invokeOnCompletion { cause -> if (cause != null) call.cancel() }
+        try {
+            call.execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) throw LlmException.fromHttp(resp.code, text)
+                parseResponse(text)
+            }
+        } catch (e: IOException) {
+            if (!isActive) throw CancellationException("Диагностика отменена")
+            throw e
+        } finally {
+            handle?.dispose()
         }
     }
 
@@ -156,9 +170,11 @@ class CloudRuProvider(
 
     private fun parseResponse(text: String): LlmResponse {
         val root = json.parseToJsonElement(text).jsonObject
-        val message = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("message")?.jsonObject
+        val choice = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject
             ?: return LlmResponse.Final("")
+        val message = choice["message"]?.jsonObject ?: return LlmResponse.Final("")
         val content = message["content"]?.jsonPrimitive?.contentOrNull
+        val finish = choice["finish_reason"]?.jsonPrimitive?.contentOrNull
         val toolCalls = message["tool_calls"]?.jsonArray
         if (!toolCalls.isNullOrEmpty()) {
             // Пропускаем нестандартные элементы, а не роняем весь агентный цикл на !!.
@@ -174,11 +190,15 @@ class CloudRuProvider(
             }
             if (calls.isNotEmpty()) return LlmResponse.ToolUse(content, calls)
         }
-        return LlmResponse.Final(content.orEmpty())
+        // finish_reason == "length" — ответ обрезан по лимиту токенов; помечаем честно.
+        val body = content.orEmpty()
+        return LlmResponse.Final(if (finish == "length") body + TRUNCATION_MARKER else body)
     }
 
     companion object {
         const val DEFAULT_BASE_URL = "https://foundation-models.api.cloud.ru/v1"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+        const val TRUNCATION_MARKER =
+            "\n\n_⚠️ Ответ обрезан по лимиту длины — попросите продолжить или сузьте вопрос._"
     }
 }

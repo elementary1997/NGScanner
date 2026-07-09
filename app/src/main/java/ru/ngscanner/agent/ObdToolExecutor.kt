@@ -41,6 +41,9 @@ class ObdToolExecutor(
         )
         return try {
             ToolResult(call.id, runTool(e, call))
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            // Отмена диагностики должна распространяться, а не превращаться в tool-error.
+            throw ce
         } catch (ex: Exception) {
             ToolResult(call.id, "Ошибка выполнения инструмента: ${ex.message}", isError = true)
         }
@@ -67,8 +70,8 @@ class ObdToolExecutor(
                 ?: "Не удалось прочитать VIN (ответ адаптера: ${raw.trim()})."
         }
         "list_supported_pids" -> "Поддерживаемые PID (0100): ${elm.command("0100")}"
-        "read_dtcs" -> formatDtcs("Активные коды неисправностей", elm.command("03"))
-        "read_pending_dtcs" -> formatDtcs("Неподтверждённые коды", elm.command("07"))
+        "read_dtcs" -> formatDtcs("Активные коды неисправностей", elm.command("03"), elm.isCan())
+        "read_pending_dtcs" -> formatDtcs("Неподтверждённые коды", elm.command("07"), elm.isCan())
         "read_freeze_frame" -> readFreezeFrame(elm)
         "read_live_data" -> readLiveData(elm, call.argumentsJson)
         "monitor_pid" -> monitorPid(elm, call.argumentsJson)
@@ -82,8 +85,8 @@ class ObdToolExecutor(
         else -> "Неизвестный инструмент: ${call.name}"
     }
 
-    private suspend fun formatDtcs(title: String, raw: String): String =
-        when (val result = ObdParser.parseDtcs(raw)) {
+    private suspend fun formatDtcs(title: String, raw: String, isCan: Boolean): String =
+        when (val result = ObdParser.parseDtcs(raw, isCan)) {
             is ObdParser.DtcResult.Ok -> if (result.codes.isEmpty()) {
                 "$title: не обнаружены."
             } else {
@@ -126,7 +129,8 @@ class ObdToolExecutor(
         val sb = StringBuilder()
         for (p in pids) {
             val suffix = p.cmd.removePrefix("01")
-            val data = ObdParser.freezeFrameBytes(elm.command("02$suffix"), suffix)
+            // Mode 02 требует байт номера кадра (00 — первый сохранённый снимок).
+            val data = ObdParser.freezeFrameBytes(elm.command("02${suffix}00"), suffix)
             val value = data?.let { runCatching { p.decode(it) }.getOrNull() }
             if (value != null) sb.append("• ${p.label}: ${formatValue(value)} ${p.unit}\n")
         }

@@ -1,6 +1,9 @@
 package ru.ngscanner.llm
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -19,6 +22,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -68,10 +72,20 @@ class ClaudeProvider(
             .addHeader("content-type", "application/json")
             .post(buildBody(request).toString().toRequestBody(JSON_MEDIA))
             .build()
-        http.newCall(httpReq).execute().use { resp ->
-            val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw LlmException.fromHttp(resp.code, text)
-            parseResponse(text)
+        val call = http.newCall(httpReq)
+        // Отмена корутины отменяет HTTP-вызов: прерывает retry-сон и не даёт слать платные запросы.
+        val handle = coroutineContext[Job]?.invokeOnCompletion { cause -> if (cause != null) call.cancel() }
+        try {
+            call.execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) throw LlmException.fromHttp(resp.code, text)
+                parseResponse(text)
+            }
+        } catch (e: IOException) {
+            if (!isActive) throw CancellationException("Диагностика отменена")
+            throw e
+        } finally {
+            handle?.dispose()
         }
     }
 
@@ -184,10 +198,12 @@ class ClaudeProvider(
             }
         }
         val stop = root["stop_reason"]?.jsonPrimitive?.content
-        return if (stop == "tool_use" || calls.isNotEmpty()) {
-            LlmResponse.ToolUse(sb.toString().ifBlank { null }, calls)
-        } else {
-            LlmResponse.Final(sb.toString())
+        val text = sb.toString()
+        return when {
+            stop == "tool_use" || calls.isNotEmpty() -> LlmResponse.ToolUse(text.ifBlank { null }, calls)
+            // Ответ упёрся в лимит длины — честно помечаем, а не выдаём за финал.
+            stop == "max_tokens" -> LlmResponse.Final(text + TRUNCATION_MARKER)
+            else -> LlmResponse.Final(text)
         }
     }
 
@@ -195,5 +211,7 @@ class ClaudeProvider(
         private const val API_URL = "https://api.anthropic.com/v1"
         private const val ANTHROPIC_VERSION = "2023-06-01"
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+        const val TRUNCATION_MARKER =
+            "\n\n_⚠️ Ответ обрезан по лимиту длины — попросите продолжить или сузьте вопрос._"
     }
 }

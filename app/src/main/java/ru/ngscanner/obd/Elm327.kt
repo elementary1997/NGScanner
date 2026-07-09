@@ -17,8 +17,28 @@ class Elm327(private val transport: ObdTransport) {
 
     private val mutex = Mutex()
 
+    /** Кэш признака CAN-протокола (см. [isCan]); сбрасывается на новом соединении. */
+    private var canProtocol: Boolean? = null
+
+    /**
+     * Является ли текущий протокол CAN (ISO 15765-4). Нужно парсеру DTC: в CAN
+     * после `43` идёт байт-счётчик кодов, в легаси-протоколах (ISO 9141/KWP/J1850)
+     * счётчика нет, а по самим байтам форматы неотличимы. Определяем по `ATDPN`
+     * (номер протокола; при автоопределении — с префиксом «A», напр. «A6») и
+     * кэшируем. Вызывать после первого OBD-запроса — тогда протокол уже выбран.
+     */
+    suspend fun isCan(): Boolean {
+        canProtocol?.let { return it }
+        val n = command("ATDPN").trim().takeLast(1).toIntOrNull(16)
+        if (n == null || n == 0) return false // протокол ещё не определён — не кэшируем
+        val result = n >= 6 // 6..9, A — CAN; 1..5 — легаси
+        canProtocol = result
+        return result
+    }
+
     /** Последовательность инициализации адаптера перед работой. */
     suspend fun initialize() = mutex.withLock {
+        canProtocol = null
         for (cmd in INIT_SEQUENCE) {
             transport.write(cmd)
             transport.readResponse()

@@ -65,11 +65,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import ru.ngscanner.ui.UiState
 import ru.ngscanner.ui.MainViewModel
 
@@ -81,9 +86,33 @@ private sealed interface GarageNav {
     data object AddVin : GarageNav
 }
 
+/** Saver для стека навигации Гаража — переживает поворот и переключение вкладок. */
+private val GarageNavSaver = Saver<GarageNav, String>(
+    save = { nav ->
+        when (nav) {
+            is GarageNav.List -> "L"
+            is GarageNav.AddSearch -> "S"
+            is GarageNav.AddVin -> "V"
+            is GarageNav.Detail -> "D:${nav.carId}"
+            is GarageNav.AddForm -> "F:" + Json.encodeToString(nav.suggestion)
+        }
+    },
+    restore = { s ->
+        when {
+            s == "S" -> GarageNav.AddSearch
+            s == "V" -> GarageNav.AddVin
+            s.startsWith("D:") -> GarageNav.Detail(s.removePrefix("D:"))
+            s.startsWith("F:") -> runCatching {
+                GarageNav.AddForm(Json.decodeFromString<VehicleSuggestion>(s.removePrefix("F:")))
+            }.getOrDefault(GarageNav.List)
+            else -> GarageNav.List
+        }
+    },
+)
+
 @Composable
 internal fun GarageTab(ui: UiState, vm: MainViewModel) {
-    var nav by remember { mutableStateOf<GarageNav>(GarageNav.List) }
+    var nav by rememberSaveable(stateSaver = GarageNavSaver) { mutableStateOf<GarageNav>(GarageNav.List) }
     // «Назад» на вложенных экранах Гаража возвращает на шаг назад, а не выходит из
     // приложения. На корневом списке обработчик выключен — тогда «назад» ловит
     // MainScreen и уводит на вкладку «Приборы».
@@ -114,6 +143,7 @@ internal fun GarageTab(ui: UiState, vm: MainViewModel) {
                     onMakeActive = { vm.setActiveCar(car.id) },
                     onDelete = { vm.deleteCar(car.id); nav = GarageNav.List },
                     onAddEntry = { text, km -> vm.addLogEntry(text, km) },
+                    onDeleteEntry = { entryId -> vm.deleteLogEntry(car.id, entryId) },
                 )
             }
         }
@@ -262,6 +292,7 @@ private fun CarDetailScreen(
     onMakeActive: () -> Unit,
     onDelete: () -> Unit,
     onAddEntry: (String, Int?) -> Unit,
+    onDeleteEntry: (String) -> Unit,
 ) {
     var showEntry by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
@@ -272,7 +303,7 @@ private fun CarDetailScreen(
         GarageTopBar(car.title, onBack)
         CarSpecCard(car, isActive, onMakeActive, onDelete = { showDelete = true })
         CtxNote()
-        LogbookSection(car.log) { showEntry = true }
+        LogbookSection(car.log, onAdd = { showEntry = true }, onDeleteEntry = onDeleteEntry)
         Spacer(Modifier.height(16.dp))
     }
     if (showEntry) {
@@ -402,7 +433,7 @@ private fun CtxNote() {
 }
 
 @Composable
-private fun LogbookSection(log: List<LogEntry>, onAdd: () -> Unit) {
+private fun LogbookSection(log: List<LogEntry>, onAdd: () -> Unit, onDeleteEntry: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
@@ -431,14 +462,15 @@ private fun LogbookSection(log: List<LogEntry>, onAdd: () -> Unit) {
                 color = cs.onSurfaceVariant,
             )
         } else {
-            log.forEach { LogEntryRow(it) }
+            log.forEach { LogEntryRow(it, onDelete = { onDeleteEntry(it.id) }) }
         }
     }
 }
 
 @Composable
-private fun LogEntryRow(e: LogEntry) {
+private fun LogEntryRow(e: LogEntry, onDelete: () -> Unit) {
     val cs = MaterialTheme.colorScheme
+    var confirm by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth()) {
         Box(
             Modifier.padding(top = 5.dp).size(9.dp).clip(CircleShape)
@@ -480,6 +512,23 @@ private fun LogEntryRow(e: LogEntry) {
             }
             Spacer(Modifier.height(12.dp))
         }
+        IconButton(onClick = { confirm = true }) {
+            Icon(Icons.Rounded.DeleteOutline, "Удалить запись", Modifier.size(18.dp), tint = cs.onSurfaceVariant)
+        }
+    }
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            icon = { Icon(Icons.Rounded.DeleteOutline, null, tint = cs.error) },
+            title = { Text("Удалить запись?") },
+            text = { Text("Запись бортжурнала будет удалена без возможности восстановления.") },
+            confirmButton = {
+                TextButton(onClick = { confirm = false; onDelete() }) {
+                    Text("Удалить", color = cs.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Отмена") } },
+        )
     }
 }
 
@@ -491,7 +540,7 @@ private fun AddBySearchScreen(
     onPick: (VehicleSuggestion) -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -538,10 +587,10 @@ private fun AddCarForm(suggestion: VehicleSuggestion, onBack: () -> Unit, onSave
     val currentYear = remember { java.time.LocalDate.now().year }
     val yearTo = suggestion.yearTo ?: currentYear
     val years = remember(suggestion) { (yearTo downTo suggestion.yearFrom).map { it.toString() } }
-    var year by remember { mutableStateOf(years.firstOrNull() ?: yearTo.toString()) }
-    var engine by remember { mutableStateOf(suggestion.engines.firstOrNull() ?: "") }
-    var mileage by remember { mutableStateOf("") }
-    var vin by remember { mutableStateOf("") }
+    var year by rememberSaveable { mutableStateOf(years.firstOrNull() ?: yearTo.toString()) }
+    var engine by rememberSaveable { mutableStateOf(suggestion.engines.firstOrNull() ?: "") }
+    var mileage by rememberSaveable { mutableStateOf("") }
+    var vin by rememberSaveable { mutableStateOf("") }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
@@ -613,8 +662,8 @@ private fun AddByVinScreen(
     onSave: (Car) -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
-    var vin by remember { mutableStateOf("") }
-    var mileage by remember { mutableStateOf("") }
+    var vin by rememberSaveable { mutableStateOf("") }
+    var mileage by rememberSaveable { mutableStateOf("") }
     val info = ui.vinResult
 
     Column(
@@ -656,10 +705,10 @@ private fun AddByVinScreen(
         if (info != null) {
             // Поля редактируемые: сервис мог определить не всё (частая ситуация для авто РФ) —
             // пользователь проверяет и дописывает.
-            var make by remember(info) { mutableStateOf(info.make) }
-            var model by remember(info) { mutableStateOf(info.model) }
-            var year by remember(info) { mutableStateOf(info.year?.toString() ?: "") }
-            var engine by remember(info) { mutableStateOf(info.engine ?: "") }
+            var make by rememberSaveable(info) { mutableStateOf(info.make) }
+            var model by rememberSaveable(info) { mutableStateOf(info.model) }
+            var year by rememberSaveable(info) { mutableStateOf(info.year?.toString() ?: "") }
+            var engine by rememberSaveable(info) { mutableStateOf(info.engine ?: "") }
 
             Text(
                 if (info.model.isBlank()) {

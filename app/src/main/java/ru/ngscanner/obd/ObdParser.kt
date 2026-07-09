@@ -49,39 +49,70 @@ object ObdParser {
     /**
      * Коды неисправностей из ответа Mode 03/07 (`43`/`47` + пары байт).
      * Каждый код: 2 старших бита — система (P/C/B/U), далее — цифры.
+     *
+     * [isCan] — протокол ЭБУ: в CAN (ISO 15765-4) после заголовка идёт
+     * байт-счётчик кодов, в легаси (ISO 9141/KWP/J1850) счётчика нет. Формат
+     * нельзя надёжно угадать по самим байтам (легаси-код P01xx неотличим от
+     * CAN-счётчика 01), поэтому протокол передаётся снаружи (см. Elm327.isCan).
      */
-    fun parseDtcs(raw: String): DtcResult {
+    fun parseDtcs(raw: String, isCan: Boolean = true): DtcResult {
         val upper = raw.uppercase()
         when {
             "UNABLE TO CONNECT" in upper || "BUS INIT" in upper || "BUSINIT" in upper ||
                 "CAN ERROR" in upper || "BUS ERROR" in upper -> return DtcResult.BusError
             "NO DATA" in upper || "NODATA" in upper -> return DtcResult.NoData
         }
-        // Длинные списки кодов приходят несколькими кадрами — собираем ISO-TP.
-        val hex = IsoTp.reassemble(raw) ?: normalize(raw)
-        val start = hex.indexOf("43").takeIf { it >= 0 } ?: hex.indexOf("47")
-        if (start < 0) {
-            return if (hex.isBlank()) DtcResult.NoData else DtcResult.Unknown(raw.trim())
+        // Каждый ответ ЭБУ разбираем отдельно: на CAN без заголовков разные модули
+        // отвечают разными строками, слияние в единый поток рождает фантомные коды.
+        val messages = IsoTp.messages(raw)
+        if (messages.isEmpty()) {
+            return if (normalize(raw).isBlank()) DtcResult.NoData else DtcResult.Unknown(raw.trim())
         }
-        return DtcResult.Ok(parseDtcPayload(hex.substring(start + 2)))
+        val codes = mutableListOf<String>()
+        var sawHeader = false
+        for (msg in messages) {
+            val start = msg.indexOf("43").takeIf { it >= 0 } ?: msg.indexOf("47")
+            if (start < 0) continue
+            sawHeader = true
+            codes += parseDtcPayload(msg.substring(start + 2), isCan)
+        }
+        if (!sawHeader) {
+            return if (normalize(raw).isBlank()) DtcResult.NoData else DtcResult.Unknown(raw.trim())
+        }
+        return DtcResult.Ok(codes.distinct())
     }
 
+    private fun parseDtcPayload(payload: String, isCan: Boolean): List<String> =
+        if (isCan) parseCanDtcs(payload) else parseLegacyDtcs(payload)
+
     /**
-     * Разбирает тело ответа после заголовка `43`/`47`.
-     *
-     * В CAN (ISO 15765-4) сразу после `43` идёт байт-счётчик числа кодов,
-     * поэтому длина тела в hex ≡ 2 (mod 4). В легаси-протоколах (ISO 9141/KWP)
-     * счётчика нет и длина ≡ 0 (mod 4). Эта чётность однозначно различает
-     * форматы — иначе на авто с 2008+ появляются фантомные коды из-за сдвига.
+     * CAN (ISO 15765-4): после `43` идёт байт-счётчик числа кодов, далее пары DTC
+     * и, возможно, хвост-заполнитель `00`. Берём ровно столько кодов, сколько
+     * указал счётчик — заполнитель отсекается по счётчику, без догадок о длине.
      */
-    private fun parseDtcPayload(afterHeader: String): List<String> {
-        val payload = if (afterHeader.length % 4 == 2) afterHeader.drop(2) else afterHeader
+    private fun parseCanDtcs(payload: String): List<String> {
+        if (payload.length < 2) return emptyList()
+        val count = payload.substring(0, 2).toIntOrNull(16) ?: return emptyList()
+        val body = payload.drop(2)
+        val codes = mutableListOf<String>()
+        var i = 0
+        while (i + 4 <= body.length && codes.size < count) {
+            val word = body.substring(i, i + 4)
+            i += 4
+            if (word == "0000") continue // заполнитель
+            runCatching { decodeDtc(word) }.getOrNull()?.let { codes.add(it) }
+        }
+        return codes
+    }
+
+    /** Легаси (ISO 9141/KWP/J1850): счётчика нет — только пары DTC. */
+    private fun parseLegacyDtcs(payload: String): List<String> {
         val codes = mutableListOf<String>()
         var i = 0
         while (i + 4 <= payload.length) {
             val word = payload.substring(i, i + 4)
             i += 4
-            if (word == "0000") continue // заполнитель
+            if (word == "0000") continue // заполнитель / пустой слот
             runCatching { decodeDtc(word) }.getOrNull()?.let { codes.add(it) }
         }
         return codes
@@ -107,7 +138,8 @@ object ObdParser {
      * оставляя 17 буквенно-цифровых символов.
      */
     fun parseVin(raw: String): String? {
-        val hex = IsoTp.reassemble(raw) ?: normalize(raw)
+        // VIN отвечает один ЭБУ — берём сообщение, содержащее заголовок 4902.
+        val hex = IsoTp.messages(raw).firstOrNull { it.contains("4902") } ?: normalize(raw)
         if (!hex.contains("4902")) return null
         val data = StringBuilder()
         for (part in hex.split("4902").drop(1)) {
@@ -154,14 +186,16 @@ object ObdParser {
 
     /**
      * Байты данных из ответа Mode 02 (freeze frame) — заголовок «42» + суффикс PID.
-     * Например для 020C ищем «420C» и возвращаем байты замороженного значения.
+     * Формат ответа: `42 PID FRAME# data…`, поэтому после «42{PID}» пропускаем
+     * байт номера кадра (frame#), иначе значение читается со сдвигом на байт.
+     * Например для 020C ищем «420C», отбрасываем номер кадра и берём данные.
      */
     fun freezeFrameBytes(raw: String, pidSuffix: String): IntArray? {
         val hex = normalize(raw)
         val prefix = "42" + pidSuffix.uppercase()
         val idx = hex.indexOf(prefix)
         if (idx < 0) return null
-        val dataHex = hex.substring(idx + prefix.length)
+        val dataHex = hex.substring(idx + prefix.length).drop(2)
         if (dataHex.length < 2) return null
         return dataHex.chunked(2).filter { it.length == 2 }.map { it.toInt(16) }.toIntArray()
     }

@@ -43,8 +43,9 @@ class ChatRepository(context: Context) {
     // ---- Активный диалог ----
 
     fun save(chat: List<ChatMessage>, history: List<LlmMessage>) {
+        // Ограничиваем размер, чтобы блоб в SharedPreferences не рос без предела.
         prefs.edit()
-            .putString(KEY_CHAT, json.encodeToString(chat))
+            .putString(KEY_CHAT, json.encodeToString(chat.takeLast(MAX_CHAT)))
             .putString(KEY_HISTORY, json.encodeToString(slim(history)))
             .apply()
     }
@@ -101,5 +102,6 @@ class ChatRepository(context: Context) {
         const val KEY_HISTORY = "history"
         const val KEY_SESSIONS = "sessions"
         const val MAX_SESSIONS = 5
+        const val MAX_CHAT = 300
     }
 }

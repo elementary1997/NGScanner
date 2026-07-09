@@ -43,7 +43,8 @@ class ObdToolExecutorTest {
 
     @Test
     fun freezeFrameDecodesFrozenRpm() = runBlocking {
-        val elm = Elm327(FakeObdTransport(mapOf("020C" to "42 0C 1A F8")))
+        // Ответ Mode 02: «42 0C FRAME# data» — байт номера кадра (00) отбрасывается.
+        val elm = Elm327(FakeObdTransport(mapOf("020C00" to "42 0C 00 1A F8")))
         val result = executor(elm, allow = false).execute(ToolCall("5", "read_freeze_frame", "{}"))
         assertTrue(result.content.contains("Обороты"))
     }

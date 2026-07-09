@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.util.concurrent.TimeUnit
 
 /** Результат разбора VIN: то, что удалось извлечь из декодера. */
 data class VinInfo(
@@ -25,7 +26,11 @@ data class VinInfo(
  */
 object VinDecoder {
 
-    private val client = OkHttpClient()
+    // callTimeout ограничивает весь вызов — иначе спиннер распознавания VIN
+    // висит бесконечно на «капризной» сети.
+    private val client = OkHttpClient.Builder()
+        .callTimeout(15, TimeUnit.SECONDS)
+        .build()
     private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun decode(vin: String): VinInfo? = withContext(Dispatchers.IO) {
@@ -70,10 +75,7 @@ object VinDecoder {
     /** Марка по WMI (первые 3 символа VIN) — офлайн-таблица, упор на рынок РФ. */
     private fun wmiMake(vin: String): String? {
         if (vin.length < 3) return null
-        val wmi = vin.substring(0, 3)
-        WMI[wmi]?.let { return it }
-        // Для ряда изготовителей значим только код страны+завода из 2 символов.
-        return WMI[vin.substring(0, 2)]
+        return WMI[vin.substring(0, 3)]
     }
 
     private val WMI = mapOf(
@@ -102,18 +104,22 @@ object VinDecoder {
         "LFV" to "FAW", "LMG" to "GAC", "LFP" to "Lifan",
     )
 
-    /** Год модели по 10-й позиции VIN (резерв, если сервис не вернул ModelYear). */
+    /**
+     * Год модели по 10-й позиции VIN (резерв, если сервис не вернул ModelYear).
+     *
+     * Код 10-й позиции повторяется каждые 30 лет (A = 1980 и 2010, 1 = 2001 и
+     * 2031). Циклы различаем по 7-й позиции: у легковых цифра → 1980–2009,
+     * буква → 2010–2039. Без этого буквы завышают год на 30 лет (W → 2028
+     * вместо 1998 для типичного X-VIN из РФ/СНГ).
+     */
     private fun yearFromVin(vin: String): Int? {
         if (vin.length < 10) return null
         val code = vin[9]
-        // A=2010 … Y=2039, 1=2001 … 9=2009 (буквы I,O,Q,U,Z в VIN не используются).
-        val yearMap = buildMap {
-            var y = 2010
-            for (c in "ABCDEFGHJKLMNPRSTVWXY") { put(c, y); y++ }
-            var n = 2001
-            for (c in "123456789") { put(c, n); n++ }
-        }
-        return yearMap[code]
+        val secondCycle = vin.length > 6 && vin[6].isLetter()
+        val letters = "ABCDEFGHJKLMNPRSTVWXY" // без I,O,Q,U,Z
+        letters.indexOf(code).takeIf { it >= 0 }?.let { return (if (secondCycle) 2010 else 1980) + it }
+        "123456789".indexOf(code).takeIf { it >= 0 }?.let { return (if (secondCycle) 2031 else 2001) + it }
+        return null
     }
 
     /** «CHEVROLET» → «Chevrolet», «LAND ROVER» → «Land Rover». */

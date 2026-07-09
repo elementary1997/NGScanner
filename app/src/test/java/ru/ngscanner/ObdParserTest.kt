@@ -34,14 +34,14 @@ class ObdParserTest {
     // ---- DTC: легаси-формат (без счётчика) ----
     @Test
     fun parsesLegacyDtc() {
-        val result = ObdParser.parseDtcs("43 01 33")
+        val result = ObdParser.parseDtcs("43 01 33", isCan = false)
         assertTrue(result is DtcResult.Ok)
         assertEquals(listOf("P0133"), (result as DtcResult.Ok).codes)
     }
 
     @Test
     fun parsesTwoLegacyDtcs() {
-        val result = ObdParser.parseDtcs("43 01 33 04 20") as DtcResult.Ok
+        val result = ObdParser.parseDtcs("43 01 33 04 20", isCan = false) as DtcResult.Ok
         assertEquals(listOf("P0133", "P0420"), result.codes)
     }
 
@@ -49,15 +49,39 @@ class ObdParserTest {
     @Test
     fun parsesCanDtcWithCounter() {
         // 43 02 0133 0420 → счётчик 02, коды P0133 и P0420 (без фантомов)
-        val result = ObdParser.parseDtcs("43 02 01 33 04 20") as DtcResult.Ok
+        val result = ObdParser.parseDtcs("43 02 01 33 04 20", isCan = true) as DtcResult.Ok
         assertEquals(listOf("P0133", "P0420"), result.codes)
     }
 
     @Test
     fun parsesCanDtcWithPadding() {
         // 43 01 0301 0000 → счётчик 01, код P0301, хвост-заполнитель игнорируется
-        val result = ObdParser.parseDtcs("43 01 03 01 00 00") as DtcResult.Ok
+        val result = ObdParser.parseDtcs("43 01 03 01 00 00", isCan = true) as DtcResult.Ok
         assertEquals(listOf("P0301"), result.codes)
+    }
+
+    @Test
+    fun parsesCanSingleFrameWithFullPadding() {
+        // 43 01 0301 000000 — заполнение до 7 байт кадра; старый парсер по чётности
+        // читал бы это как легаси и давал фантомы P0103/P0100. Счётчик даёт P0301.
+        val result = ObdParser.parseDtcs("43 01 03 01 00 00 00", isCan = true) as DtcResult.Ok
+        assertEquals(listOf("P0301"), result.codes)
+    }
+
+    // ---- DTC: ответы нескольких ЭБУ (разные строки) не сливаются ----
+    @Test
+    fun multiEcuCanDtcsNoPhantom() {
+        // Модуль A: 43 01 0133 (P0133); модуль B: 43 00 (кодов нет).
+        // Слияние в один поток дало бы фантом C0300 — теперь его нет.
+        val result = ObdParser.parseDtcs("43 01 01 33\r43 00", isCan = true) as DtcResult.Ok
+        assertEquals(listOf("P0133"), result.codes)
+    }
+
+    @Test
+    fun multiEcuLegacyDtcsCombined() {
+        // Два легаси-ЭБУ отвечают разными строками — коды собираются из обоих.
+        val result = ObdParser.parseDtcs("43 01 33\r43 04 20", isCan = false) as DtcResult.Ok
+        assertEquals(listOf("P0133", "P0420"), result.codes)
     }
 
     // ---- DTC: различаем «кодов нет» и «нет связи» ----

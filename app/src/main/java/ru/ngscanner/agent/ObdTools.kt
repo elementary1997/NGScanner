@@ -60,7 +60,7 @@ object ObdTools {
             parametersJsonSchema = """
                 {"type":"object","properties":{
                   "pid":{"type":"string"},
-                  "duration_sec":{"type":"integer","minimum":1,"maximum":120}},
+                  "duration_sec":{"type":"integer","minimum":1,"maximum":60}},
                 "required":["pid","duration_sec"],"additionalProperties":false}
             """.trimIndent(),
         ),
