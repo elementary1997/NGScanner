@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 
 package ru.ngscanner.ui
 
@@ -23,8 +23,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -42,7 +48,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Garage
@@ -85,7 +93,10 @@ import androidx.compose.material.icons.rounded.DeviceThermostat
 import androidx.compose.material.icons.rounded.LocalGasStation
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.graphics.drawscope.Stroke
 import ru.ngscanner.obd.ObdPid
 import androidx.compose.material.icons.Icons
@@ -103,11 +114,13 @@ import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.HealthAndSafety
 import androidx.compose.material.icons.rounded.LinkOff
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Thermostat
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
@@ -465,7 +478,10 @@ private fun Dashboard(
         MetricsSection("Двигатель", listOf(ObdPid.ENGINE_LOAD, ObdPid.TIMING, ObdPid.SPEED), metrics, onTap)
         MetricsSection(
             "Впуск / Топливо",
-            listOf(ObdPid.THROTTLE, ObdPid.MAF, ObdPid.MAP, ObdPid.INTAKE_TEMP, ObdPid.STFT, ObdPid.FUEL_LEVEL),
+            listOf(
+                ObdPid.THROTTLE, ObdPid.MAF, ObdPid.MAP, ObdPid.INTAKE_TEMP,
+                ObdPid.STFT, ObdPid.LTFT, ObdPid.O2_LAMBDA, ObdPid.FUEL_LEVEL,
+            ),
             metrics,
             onTap,
         )
@@ -536,7 +552,9 @@ private fun MetricCard(pid: ObdPid, value: Double?, onTap: (ObdPid) -> Unit, mod
     val fraction = ((value ?: 0.0) / pid.gaugeMax).toFloat().coerceIn(0f, 1f)
     ElevatedCard(
         onClick = { onTap(pid) },
-        modifier = modifier.heightIn(min = 104.dp),
+        modifier = modifier
+            .heightIn(min = 104.dp)
+            .semantics { stateDescription = if (hasValue) statusText(status) else "нет данных" },
         shape = RoundedCornerShape(16.dp),
     ) {
         Row(Modifier.height(IntrinsicSize.Min)) {
@@ -558,7 +576,12 @@ private fun MetricCard(pid: ObdPid, value: Double?, onTap: (ObdPid) -> Unit, mod
                         maxLines = 1,
                         modifier = Modifier.weight(1f),
                     )
-                    Icon(Icons.Rounded.Info, null, Modifier.size(14.dp), tint = cs.outline)
+                    Icon(
+                        statusIcon(status),
+                        null,
+                        Modifier.size(14.dp),
+                        tint = if (hasValue && status != MetricStatus.NORMAL) statusColor else cs.outline,
+                    )
                 }
                 Spacer(Modifier.height(11.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
@@ -623,7 +646,14 @@ private fun CircularGauge(pid: ObdPid, value: Double?, onTap: (ObdPid) -> Unit, 
     }
     val trackColor = cs.surfaceVariant.copy(alpha = 0.5f)
 
-    ElevatedCard(onClick = { onTap(pid) }, modifier = modifier, shape = RoundedCornerShape(20.dp)) {
+    ElevatedCard(
+        onClick = { onTap(pid) },
+        modifier = modifier.semantics {
+            stateDescription = value?.let { "${pid.label} ${formatMetric(it)} ${pid.unit}, ${statusText(status)}" }
+                ?: "${pid.label}: нет данных"
+        },
+        shape = RoundedCornerShape(20.dp),
+    ) {
         Box(
             Modifier.padding(14.dp).fillMaxWidth().aspectRatio(1f),
             contentAlignment = Alignment.Center,
@@ -682,6 +712,20 @@ private fun statusColor(status: MetricStatus): Color = when (status) {
     MetricStatus.NORMAL -> StatusGood
     MetricStatus.WARNING -> MaterialTheme.colorScheme.tertiary
     MetricStatus.CRITICAL -> MaterialTheme.colorScheme.error
+}
+
+/** Текст состояния — для скринридера и как не-цветовой признак (WCAG 1.4.1). */
+private fun statusText(status: MetricStatus): String = when (status) {
+    MetricStatus.NORMAL -> "норма"
+    MetricStatus.WARNING -> "внимание"
+    MetricStatus.CRITICAL -> "критично"
+}
+
+/** Иконка состояния — форма отличает статус независимо от цвета. */
+private fun statusIcon(status: MetricStatus): ImageVector = when (status) {
+    MetricStatus.NORMAL -> Icons.Rounded.Info
+    MetricStatus.WARNING -> Icons.Rounded.Warning
+    MetricStatus.CRITICAL -> Icons.Rounded.Error
 }
 
 /** Шторка с описанием параметра и нормами (открывается по тапу на прибор/карточку). */
@@ -803,7 +847,8 @@ private fun metricIcon(pid: ObdPid): ImageVector = when (pid) {
     ObdPid.MAF -> Icons.Rounded.Air
     ObdPid.MAP -> Icons.Rounded.Compress
     ObdPid.THROTTLE -> Icons.Rounded.Tune
-    ObdPid.STFT, ObdPid.FUEL_LEVEL -> Icons.Rounded.LocalGasStation
+    ObdPid.STFT, ObdPid.LTFT, ObdPid.FUEL_LEVEL -> Icons.Rounded.LocalGasStation
+    ObdPid.O2_LAMBDA -> Icons.Rounded.Science
     ObdPid.TIMING -> Icons.Rounded.Timer
     ObdPid.VOLTAGE -> Icons.Rounded.Bolt
 }
@@ -858,6 +903,7 @@ private fun ChatTab(
     onCancel: () -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val context = LocalContext.current
     // Автопрокрутка к последнему сообщению при появлении новых и при печати статусов.
     LaunchedEffect(ui.chat.size, ui.diagnosing) {
         val count = ui.chat.size + if (ui.diagnosing) 1 else 0
@@ -870,7 +916,7 @@ private fun ChatTab(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (ui.chat.isEmpty()) {
-                item { EmptyChatHint { onSend(QUICK_DIAGNOSE_PROMPT, emptyList()) } }
+                item { EmptyChatHint(onSend = { onSend(it, emptyList()) }) }
             }
             items(ui.chat) { msg -> ChatBubble(msg) }
             if (ui.diagnosing) {
@@ -890,31 +936,80 @@ private fun ChatTab(
             visionEnabled = isVisionModel(ui.provider, ui.model),
             onSend = onSend,
             onClear = onClear,
+            onShare = { shareReport(context, ui.chat, ui.garage.activeCar?.title) },
+            canShare = ui.chat.any { it.role == ChatRole.ASSISTANT },
             hasChat = ui.chat.isNotEmpty(),
         )
     }
 }
 
+/** Собирает диалог в текстовый отчёт и открывает системный «Поделиться». */
+private fun shareReport(context: android.content.Context, chat: List<ChatMessage>, carTitle: String?) {
+    val sb = StringBuilder("Диагностика NG Scanner")
+    carTitle?.let { sb.append(" — ").append(it) }
+    sb.append("\n\n")
+    for (m in chat) {
+        when (m.role) {
+            ChatRole.USER -> sb.append("❓ ").append(m.text).append("\n\n")
+            ChatRole.ASSISTANT -> sb.append(m.text).append("\n\n")
+            else -> Unit
+        }
+    }
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_SUBJECT, "Диагностика авто — NG Scanner")
+        putExtra(android.content.Intent.EXTRA_TEXT, sb.toString().trim())
+    }
+    context.startActivity(android.content.Intent.createChooser(intent, "Поделиться отчётом"))
+}
+
+private val SYMPTOMS = listOf(
+    "Плавают обороты на холостых",
+    "Троит на холодную",
+    "Горит Check Engine",
+    "Повышенный расход топлива",
+    "Вибрация или странный звук",
+    "Плохо заводится",
+)
+
 @Composable
-private fun EmptyChatHint(onDiagnose: () -> Unit) {
+private fun EmptyChatHint(onSend: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
     Column(
-        modifier = Modifier.fillMaxWidth().padding(top = 56.dp, start = 8.dp, end = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 36.dp, start = 8.dp, end = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Icon(Icons.Rounded.HealthAndSafety, null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+        Icon(Icons.Rounded.HealthAndSafety, null, Modifier.size(52.dp), tint = cs.primary)
         Text("Диагностика через LLM", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text(
-            "Опишите симптом или запустите быструю диагностику — модель прочитает коды и " +
-                "параметры с адаптера и даст понятный вердикт.",
+            "Опишите симптом или выберите частую жалобу — модель прочитает коды и параметры " +
+                "с адаптера и даст понятный вердикт.",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = cs.onSurfaceVariant,
+            textAlign = TextAlign.Center,
         )
-        Button(onClick = onDiagnose, shape = RoundedCornerShape(16.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            SYMPTOMS.forEach { symptom ->
+                AssistChip(onClick = { onSend(symptom) }, label = { Text(symptom) })
+            }
+        }
+        Button(onClick = { onSend(QUICK_DIAGNOSE_PROMPT) }, shape = RoundedCornerShape(16.dp)) {
             Icon(Icons.Rounded.Bolt, null)
             Spacer(Modifier.width(8.dp))
             Text("Быстрая диагностика")
         }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Диагностика охватывает двигатель и систему выпуска (generic OBD-II). ABS, подушки " +
+                "безопасности и АКПП требуют дилерских протоколов и здесь недоступны.",
+            style = MaterialTheme.typography.bodySmall,
+            color = cs.onSurfaceVariant.copy(alpha = 0.7f),
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -972,6 +1067,8 @@ private fun ChatInput(
     visionEnabled: Boolean,
     onSend: (String, List<LlmImage>) -> Unit,
     onClear: () -> Unit,
+    onShare: () -> Unit,
+    canShare: Boolean,
     hasChat: Boolean,
 ) {
     var text by remember { mutableStateOf("") }
@@ -982,7 +1079,12 @@ private fun ChatInput(
         if (uri != null) scope.launch { image = ImageEncoder.encode(context, uri) }
     }
 
-    Surface(modifier = Modifier.imePadding(), tonalElevation = 3.dp) {
+    // Поднимаем панель ввода над клавиатурой. Из ime-инсета вычитаем navbar,
+    // который Scaffold уже учёл снизу — иначе получается двойной отступ (чёрная полоса).
+    Surface(
+        modifier = Modifier.windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars)),
+        tonalElevation = 3.dp,
+    ) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             if (image != null) {
                 Row(
@@ -1006,6 +1108,11 @@ private fun ChatInput(
                 if (hasChat) {
                     IconButton(onClick = onClear) {
                         Icon(Icons.Rounded.DeleteSweep, "Очистить чат", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (canShare) {
+                    IconButton(onClick = onShare) {
+                        Icon(Icons.Rounded.IosShare, "Поделиться отчётом", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 if (visionEnabled) {
@@ -1125,8 +1232,14 @@ private fun SettingsTab(ui: UiState, vm: MainViewModel) {
 
         InfoCard(
             Icons.Rounded.ErrorOutline,
-            "Ключ хранится только на устройстве и не попадает в код приложения. " +
+            "Ключ хранится в зашифрованном виде только на устройстве. " +
                 "Claude — console.anthropic.com; Cloud.ru — личный кабинет (сервисный аккаунт).",
+        )
+        InfoCard(
+            Icons.Rounded.Info,
+            "Вердикт LLM носит рекомендательный характер и не заменяет осмотр мастером. " +
+                "Тексты диалога передаются провайдеру модели, а VIN при распознавании — сервису " +
+                "NHTSA (США): это трансграничная передача данных. Не вводите персональные данные.",
         )
     }
 }
@@ -1704,7 +1817,8 @@ private fun AddByVinScreen(
     ) {
         GarageTopBar("Добавить по VIN", onBack)
         Text(
-            "Введите VIN — определим марку, модель, год и двигатель автоматически (нужен интернет).",
+            "Введите VIN — определим марку, модель, год и двигатель автоматически. VIN " +
+                "отправляется в сервис NHTSA (США); для авто рынка РФ марка определится офлайн.",
             style = MaterialTheme.typography.bodyMedium,
             color = cs.onSurfaceVariant,
         )

@@ -42,14 +42,17 @@ import ru.ngscanner.obd.DtcDatabase
 import ru.ngscanner.obd.Elm327
 import ru.ngscanner.obd.ObdPid
 import ru.ngscanner.settings.AppSettings
+import ru.ngscanner.settings.ChatRepository
 import ru.ngscanner.transport.ClassicSppTransport
 
 enum class ConnectionState { Disconnected, Connecting, Connected }
 
 data class DeviceUi(val name: String, val address: String)
 
+@kotlinx.serialization.Serializable
 enum class ChatRole { USER, ASSISTANT, TOOL, SYSTEM }
 
+@kotlinx.serialization.Serializable
 data class ChatMessage(val role: ChatRole, val text: String)
 
 sealed interface TestStatus {
@@ -101,13 +104,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val settings = AppSettings(app)
     private val garageRepo = GarageRepository(app)
     private val normsRepo = ModelNormsRepository(app)
+    private val chatRepo = ChatRepository(app)
 
     private var transport: ClassicSppTransport? = null
     private var elm: Elm327? = null
     private var pollJob: Job? = null
     private var diagnoseJob: Job? = null
     private var clearConfirm: CompletableDeferred<Boolean>? = null
-    private var llmHistory: List<LlmMessage> = emptyList()
+    private var supportedPids: Set<String> = emptySet()
+    private var llmHistory: List<LlmMessage> = chatRepo.loadHistory()
 
     private val _ui = MutableStateFlow(
         garageRepo.load().let { garage ->
@@ -118,6 +123,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 apiKey = settings.apiKey(settings.provider),
                 garage = garage,
                 modelNorms = garage.activeCar?.let { c -> normsRepo.normsFor(c.id) } ?: emptyMap(),
+                chat = chatRepo.loadChat(),
             )
         },
     )
@@ -173,6 +179,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 t.connect()
                 val e = Elm327(t)
                 e.initialize()
+                supportedPids = runCatching { e.readSupportedPids() }.getOrDefault(emptySet())
                 transport = t
                 elm = e
                 _ui.update {
@@ -190,17 +197,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun startPolling() {
         if (pollJob?.isActive == true) return
+        // Опрашиваем только PID, которые авто реально поддерживает (по маскам 0100/0120/0140);
+        // если определить не удалось — все, как фолбэк.
+        val pids = ObdPid.entries.filter { supportedPids.isEmpty() || it.cmd in supportedPids }
         pollJob = viewModelScope.launch {
+            var emptyStreak = 0
+            var lastDataAt = System.currentTimeMillis()
             while (isActive) {
                 val e = elm ?: break
                 val values = LinkedHashMap<ObdPid, Double>()
-                for (pid in ObdPid.entries) {
+                for (pid in pids) {
                     val v = runCatching { e.read(pid) }.getOrNull()
                     if (v != null) values[pid] = v
                 }
-                if (values.isNotEmpty()) _ui.update { it.copy(metrics = values) }
-                delay(POLL_INTERVAL_MS)
+                if (values.isNotEmpty()) {
+                    _ui.update { it.copy(metrics = values) }
+                    emptyStreak = 0
+                    lastDataAt = System.currentTimeMillis()
+                } else {
+                    emptyStreak++
+                }
+                // Защита АКБ: ЭБУ давно не отвечает (зажигание выкл / забытый адаптер) — отключаемся.
+                if (System.currentTimeMillis() - lastDataAt > BATTERY_GUARD_MS) {
+                    autoDisconnectForBattery()
+                    break
+                }
+                // Адаптивный интервал: пока данных нет — опрашиваем реже (шина и батарея).
+                delay(if (emptyStreak >= IDLE_THRESHOLD) POLL_IDLE_MS else POLL_INTERVAL_MS)
             }
+        }
+    }
+
+    private fun autoDisconnectForBattery() {
+        disconnect()
+        _ui.update {
+            it.copy(
+                error = "Адаптер отключён для защиты аккумулятора: ЭБУ долго не отвечал. " +
+                    "Отсоедините ELM327 от разъёма OBD, если он не используется — иначе он посадит АКБ.",
+            )
         }
     }
 
@@ -261,6 +295,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 clearConfirm?.complete(false)
                 clearConfirm = null
                 _ui.update { it.copy(diagnosing = false, clearDtcsPending = false) }
+                chatRepo.save(_ui.value.chat, llmHistory)
                 if (wasPolling && elm != null) startPolling()
             }
         }
@@ -290,6 +325,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearChat() {
         llmHistory = emptyList()
+        chatRepo.clear()
         _ui.update { it.copy(chat = emptyList()) }
     }
 
@@ -530,5 +566,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val POLL_INTERVAL_MS = 1500L
+        private const val POLL_IDLE_MS = 5000L
+        private const val IDLE_THRESHOLD = 4
+        private const val BATTERY_GUARD_MS = 5 * 60 * 1000L
     }
 }
