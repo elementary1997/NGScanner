@@ -55,16 +55,16 @@ object ObdParser {
      * нельзя надёжно угадать по самим байтам (легаси-код P01xx неотличим от
      * CAN-счётчика 01), поэтому протокол передаётся снаружи (см. Elm327.isCan).
      */
-    fun parseDtcs(raw: String, isCan: Boolean = true): DtcResult {
+    fun parseDtcs(raw: String, isCan: Boolean = true, headerHexLen: Int = 0): DtcResult {
         val upper = raw.uppercase()
         when {
             "UNABLE TO CONNECT" in upper || "BUS INIT" in upper || "BUSINIT" in upper ||
                 "CAN ERROR" in upper || "BUS ERROR" in upper -> return DtcResult.BusError
             "NO DATA" in upper || "NODATA" in upper -> return DtcResult.NoData
         }
-        // Каждый ответ ЭБУ разбираем отдельно: на CAN без заголовков разные модули
-        // отвечают разными строками, слияние в единый поток рождает фантомные коды.
-        val messages = IsoTp.messages(raw)
+        // Каждый ответ ЭБУ разбираем отдельно. С заголовками (ATH1) кадры группируются
+        // по CAN-ID — единственный надёжный способ не слить ответы разных модулей.
+        val messages = IsoTp.messages(raw, headerHexLen)
         if (messages.isEmpty()) {
             return if (normalize(raw).isBlank()) DtcResult.NoData else DtcResult.Unknown(raw.trim())
         }
@@ -137,9 +137,9 @@ object ObdParser {
      * поток, затем после `4902` пропускаем байт-счётчик и читаем ASCII-байты,
      * оставляя 17 буквенно-цифровых символов.
      */
-    fun parseVin(raw: String): String? {
+    fun parseVin(raw: String, headerHexLen: Int = 0): String? {
         // VIN отвечает один ЭБУ — берём сообщение, содержащее заголовок 4902.
-        val hex = IsoTp.messages(raw).firstOrNull { it.contains("4902") } ?: normalize(raw)
+        val hex = IsoTp.messages(raw, headerHexLen).firstOrNull { it.contains("4902") } ?: normalize(raw)
         if (!hex.contains("4902")) return null
         val data = StringBuilder()
         for (part in hex.split("4902").drop(1)) {

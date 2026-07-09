@@ -26,12 +26,29 @@ object IsoTp {
      * Отдельные сообщения прикладного уровня (по одному на ответивший ЭБУ),
      * с уже собранными многокадровыми ISO-TP ответами. Каждый элемент —
      * «чистый» hex (верхний регистр), начиная с байта Mode+PID.
+     *
+     * [headerHexLen] > 0 — включены заголовки ELM327 (ATH1) и каждая строка
+     * начинается с CAN-ID указанной длины (11-bit → 3, 29-bit → 8). Тогда кадры
+     * сначала группируются по ЭБУ и только потом собираются ISO-TP — это
+     * единственный надёжный способ не слить ответы разных модулей в фантомы.
      */
-    fun messages(raw: String): List<String> {
+    fun messages(raw: String, headerHexLen: Int = 0): List<String> {
         val lines = raw.split('\r', '\n')
             .map { it.trim() }
             .filter { it.isNotEmpty() && !it.equals("OK", ignoreCase = true) && it != ">" }
         if (lines.isEmpty()) return emptyList()
+
+        // --- Заголовки включены: группируем кадры по CAN-ID (ЭБУ), затем ISO-TP. ---
+        if (headerHexLen > 0) {
+            val hexLines = lines.map { hexOnly(it) }.filter { it.isNotEmpty() }
+            // Проверяем, что строки действительно похожи на кадры с заголовком:
+            // длина > заголовок+PCI и данные после заголовка байт-выровнены. Иначе
+            // (клон проигнорировал ATH1) — падаем в бесзаголовочный разбор ниже.
+            val headered = hexLines.isNotEmpty() && hexLines.all {
+                it.length > headerHexLen + 2 && (it.length - headerHexLen) % 2 == 0
+            }
+            if (headered) return messagesByHeader(hexLines, headerHexLen)
+        }
 
         // --- Авто-форматирование (CAF): «NNN» (длина) + строки «i:данные». ---
         // Это один логический ответ (ELM собрал ISO-TP сам).
@@ -75,6 +92,50 @@ object IsoTp {
 
     /** Полезная нагрузка первого сообщения — для одиночных ответов (например VIN). */
     fun reassemble(raw: String): String? = messages(raw).firstOrNull()
+
+    /** Группирует кадры по заголовку (ЭБУ) и собирает ISO-TP каждого независимо. */
+    private fun messagesByHeader(hexLines: List<String>, headerLen: Int): List<String> {
+        val byEcu = LinkedHashMap<String, MutableList<String>>()
+        for (line in hexLines) {
+            val ecu = line.substring(0, headerLen)
+            byEcu.getOrPut(ecu) { mutableListOf() }.add(line.substring(headerLen))
+        }
+        return byEcu.values.mapNotNull { reassembleEcuFrames(it) }
+    }
+
+    /**
+     * Собирает кадры одного ЭБУ (заголовок уже снят, PCI присутствует) в чистые
+     * данные прикладного уровня. Single Frame — длина в младшем нибле PCI;
+     * First+Consecutive — 12-битная длина, у CF снимается 1 байт PCI.
+     */
+    private fun reassembleEcuFrames(frames: List<String>): String? {
+        if (frames.isEmpty()) return null
+        val first = frames.first()
+        if (first.length < 2) return null
+        val pci = first.substring(0, 2).toIntOrNull(16) ?: return null
+        return when (pci and 0xF0) {
+            0x00 -> { // Single Frame
+                val len = pci and 0x0F
+                trimTo(first.substring(2), len).ifEmpty { null }
+            }
+            0x10 -> { // First Frame + Consecutive Frames
+                if (first.length < 4) return null
+                val hi = first.substring(2, 4).toIntOrNull(16) ?: return null
+                val len = ((pci and 0x0F) shl 8) or hi
+                val sb = StringBuilder(first.substring(4)) // после 2 байт PCI FF
+                for (cf in frames.drop(1)) {
+                    val cfPci = cf.take(2).toIntOrNull(16)
+                    if (cf.length >= 2 && cfPci != null && (cfPci and 0xF0) == 0x20) {
+                        sb.append(cf.substring(2)) // отбрасываем 1 байт PCI CF
+                    } else {
+                        sb.append(cf)
+                    }
+                }
+                trimTo(sb.toString(), len).ifEmpty { null }
+            }
+            else -> first.ifEmpty { null } // не ISO-TP PCI — как есть
+        }
+    }
 
     /** Обрезает hex до объявленной длины в байтах (если она валидна). */
     private fun trimTo(hex: String, declaredBytes: Int?): String {

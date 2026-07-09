@@ -17,28 +17,44 @@ class Elm327(private val transport: ObdTransport) {
 
     private val mutex = Mutex()
 
-    /** Кэш признака CAN-протокола (см. [isCan]); сбрасывается на новом соединении. */
-    private var canProtocol: Boolean? = null
+    /** Кэш номера протокола ELM327 (ATDPN); сбрасывается на новом соединении. */
+    private var protocolNum: Int? = null
+
+    /**
+     * Номер текущего протокола ELM327 по `ATDPN` (при автоопределении — с префиксом
+     * «A», напр. «A6»). Кэшируется; `null`, пока протокол не определён. Вызывать
+     * после первого OBD-запроса — тогда автоопределение уже завершилось.
+     */
+    private suspend fun protocolNumber(): Int? {
+        protocolNum?.let { return it }
+        val n = command("ATDPN").trim().takeLast(1).toIntOrNull(16)
+        if (n == null || n == 0) return null // ещё не определён — не кэшируем
+        protocolNum = n
+        return n
+    }
 
     /**
      * Является ли текущий протокол CAN (ISO 15765-4). Нужно парсеру DTC: в CAN
-     * после `43` идёт байт-счётчик кодов, в легаси-протоколах (ISO 9141/KWP/J1850)
-     * счётчика нет, а по самим байтам форматы неотличимы. Определяем по `ATDPN`
-     * (номер протокола; при автоопределении — с префиксом «A», напр. «A6») и
-     * кэшируем. Вызывать после первого OBD-запроса — тогда протокол уже выбран.
+     * после `43` идёт байт-счётчик кодов, в легаси (ISO 9141/KWP/J1850) счётчика
+     * нет, а по самим байтам форматы неотличимы.
      */
-    suspend fun isCan(): Boolean {
-        canProtocol?.let { return it }
-        val n = command("ATDPN").trim().takeLast(1).toIntOrNull(16)
-        if (n == null || n == 0) return false // протокол ещё не определён — не кэшируем
-        val result = n >= 6 // 6..9, A — CAN; 1..5 — легаси
-        canProtocol = result
-        return result
+    suspend fun isCan(): Boolean = (protocolNumber() ?: 0) >= 6
+
+    /**
+     * Длина заголовка CAN-ID в hex-символах при включённых заголовках (ATH1).
+     * Нужна для группировки ответов по ЭБУ (иначе кадры разных модулей сливаются
+     * и рождают фантомные коды). 11-bit CAN → 3 (7Ex), 29-bit → 8 (18DAF1xx),
+     * легаси/неизвестно → 0 (группировка не применяется).
+     */
+    suspend fun headerHexLen(): Int = when (protocolNumber()) {
+        6, 8 -> 3
+        7, 9 -> 8
+        else -> 0
     }
 
     /** Последовательность инициализации адаптера перед работой. */
     suspend fun initialize() = mutex.withLock {
-        canProtocol = null
+        protocolNum = null
         for (cmd in INIT_SEQUENCE) {
             transport.write(cmd)
             transport.readResponse()
@@ -78,8 +94,9 @@ class Elm327(private val transport: ObdTransport) {
     suspend fun readCoolantTemp(): Int? = ObdParser.parseCoolantTemp(command("0105"))
 
     companion object {
-        /** ATZ — сброс; ATE0 — эхо выкл; ATL0 — переводы строк выкл;
-         *  ATS0 — пробелы выкл; ATSP0 — автоопределение протокола. */
-        val INIT_SEQUENCE = listOf("ATZ", "ATE0", "ATL0", "ATS0", "ATSP0")
+        /** ATZ — сброс; ATE0 — эхо выкл; ATL0 — переводы строк выкл; ATS0 — пробелы
+         *  выкл; ATH1 — показывать заголовки (CAN-ID), чтобы различать ЭБУ в ответах;
+         *  ATSP0 — автоопределение протокола. */
+        val INIT_SEQUENCE = listOf("ATZ", "ATE0", "ATL0", "ATS0", "ATH1", "ATSP0")
     }
 }

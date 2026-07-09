@@ -66,12 +66,12 @@ class ObdToolExecutor(
             "Соединение активно. Протокол: ${elm.command("ATDP").ifBlank { "неизвестен" }}"
         "read_vehicle_info" -> {
             val raw = elm.command("0902")
-            ObdParser.parseVin(raw)?.let { "VIN автомобиля: $it" }
+            ObdParser.parseVin(raw, elm.headerHexLen())?.let { "VIN автомобиля: $it" }
                 ?: "Не удалось прочитать VIN (ответ адаптера: ${raw.trim()})."
         }
         "list_supported_pids" -> "Поддерживаемые PID (0100): ${elm.command("0100")}"
-        "read_dtcs" -> formatDtcs("Активные коды неисправностей", elm.command("03"), elm.isCan())
-        "read_pending_dtcs" -> formatDtcs("Неподтверждённые коды", elm.command("07"), elm.isCan())
+        "read_dtcs" -> formatDtcs("Активные коды неисправностей", elm.command("03"), elm.isCan(), elm.headerHexLen())
+        "read_pending_dtcs" -> formatDtcs("Неподтверждённые коды", elm.command("07"), elm.isCan(), elm.headerHexLen())
         "read_freeze_frame" -> readFreezeFrame(elm)
         "read_live_data" -> readLiveData(elm, call.argumentsJson)
         "monitor_pid" -> monitorPid(elm, call.argumentsJson)
@@ -85,8 +85,8 @@ class ObdToolExecutor(
         else -> "Неизвестный инструмент: ${call.name}"
     }
 
-    private suspend fun formatDtcs(title: String, raw: String, isCan: Boolean): String =
-        when (val result = ObdParser.parseDtcs(raw, isCan)) {
+    private suspend fun formatDtcs(title: String, raw: String, isCan: Boolean, headerHexLen: Int): String =
+        when (val result = ObdParser.parseDtcs(raw, isCan, headerHexLen)) {
             is ObdParser.DtcResult.Ok -> if (result.codes.isEmpty()) {
                 "$title: не обнаружены."
             } else {
