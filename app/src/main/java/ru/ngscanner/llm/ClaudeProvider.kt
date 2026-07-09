@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -197,13 +198,18 @@ class ClaudeProvider(
                 )
             }
         }
+        val usage = root["usage"]?.jsonObject?.let { u ->
+            val inp = u["input_tokens"]?.jsonPrimitive?.intOrNull ?: 0
+            val out = u["output_tokens"]?.jsonPrimitive?.intOrNull ?: 0
+            if (inp + out > 0) TokenUsage(inp, out) else null
+        }
         val stop = root["stop_reason"]?.jsonPrimitive?.content
         val text = sb.toString()
         return when {
-            stop == "tool_use" || calls.isNotEmpty() -> LlmResponse.ToolUse(text.ifBlank { null }, calls)
+            stop == "tool_use" || calls.isNotEmpty() -> LlmResponse.ToolUse(text.ifBlank { null }, calls, usage)
             // Ответ упёрся в лимит длины — честно помечаем, а не выдаём за финал.
-            stop == "max_tokens" -> LlmResponse.Final(text + TRUNCATION_MARKER)
-            else -> LlmResponse.Final(text)
+            stop == "max_tokens" -> LlmResponse.Final(text + TRUNCATION_MARKER, usage)
+            else -> LlmResponse.Final(text, usage)
         }
     }
 

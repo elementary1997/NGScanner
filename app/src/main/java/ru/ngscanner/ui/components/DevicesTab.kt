@@ -28,6 +28,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -57,6 +58,11 @@ internal fun DevicesTab(
 ) {
     // Имя открытого параметра (String сохраняется в Bundle → график переживает поворот).
     var graphName by rememberSaveable { mutableStateOf<String?>(null) }
+    // При обрыве связи закрываем график, иначе при авто-реконнекте early-return
+    // прыгнул бы сразу в него, минуя дашборд.
+    LaunchedEffect(ui.connection) {
+        if (ui.connection != ConnectionState.Connected) graphName = null
+    }
     val graph = graphName?.let { name -> runCatching { ObdPid.valueOf(name) }.getOrNull() }
     // Полноэкранный график заменяет весь экран вкладки (у него собственный скролл),
     // а не вкладывается в скролл дашборда — иначе вложенные verticalScroll падают.

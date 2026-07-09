@@ -102,6 +102,12 @@ internal fun ChatTab(
 ) {
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    val visionEnabled = isVisionModel(ui.provider, ui.model)
+    // Переключились на модель без vision (напр. Cloud.ru) — прикреплённое фото
+    // сбрасываем, иначе отправка ушла бы в API с ошибкой.
+    LaunchedEffect(visionEnabled) {
+        if (!visionEnabled && ui.pendingImage != null) onClearImage()
+    }
     // «Назад» из открытого диалога закрывает его к списку последних сессий (текущий
     // диалог уходит в архив, не теряется), а не переключает вкладку. Обработчик
     // объявлен глубже MainScreen → имеет приоритет над стеком вкладок.
@@ -143,7 +149,7 @@ internal fun ChatTab(
         }
         ChatInput(
             enabled = !ui.diagnosing,
-            visionEnabled = isVisionModel(ui.provider, ui.model),
+            visionEnabled = visionEnabled,
             pendingImage = ui.pendingImage,
             onAttachImage = onAttachImage,
             onClearImage = onClearImage,
@@ -461,8 +467,8 @@ private fun ChatInput(
     // панель над клавиатурой без двойного отступа (навбар съеден consumeWindowInsets).
     Surface(modifier = Modifier.imePadding(), color = cs.surface) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-            // Прикреплённое фото — компактный чип над полем.
-            if (pendingImage != null) {
+            // Прикреплённое фото — компактный чип над полем (только для vision-модели).
+            if (pendingImage != null && visionEnabled) {
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = cs.surfaceVariant,
@@ -489,8 +495,8 @@ private fun ChatInput(
                 ) {
                     if (hasMenu) {
                         Box {
-                            IconButton(onClick = { menuOpen = true }) {
-                                Icon(Icons.Rounded.Add, "Действия", tint = cs.onSurfaceVariant)
+                            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(38.dp)) {
+                                Icon(Icons.Rounded.Add, "Действия", Modifier.size(22.dp), tint = cs.onSurfaceVariant)
                             }
                             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                 if (visionEnabled) {
@@ -526,8 +532,8 @@ private fun ChatInput(
                     BasicTextField(
                         value = text,
                         onValueChange = { text = it },
-                        modifier = Modifier.weight(1f).padding(vertical = 13.dp),
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = cs.onSurface),
+                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp, vertical = 9.dp),
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = cs.onSurface),
                         cursorBrush = SolidColor(cs.primary),
                         maxLines = 5,
                         decorationBox = { inner ->
@@ -535,7 +541,7 @@ private fun ChatInput(
                                 if (text.isEmpty()) {
                                     Text(
                                         "Опишите проблему или вопрос…",
-                                        style = MaterialTheme.typography.bodyLarge,
+                                        style = MaterialTheme.typography.bodyMedium,
                                         color = cs.onSurfaceVariant,
                                         maxLines = 1,
                                     )
@@ -547,13 +553,14 @@ private fun ChatInput(
                     Spacer(Modifier.width(4.dp))
                     FilledIconButton(
                         onClick = {
-                            onSend(text, pendingImage?.let { listOf(it) } ?: emptyList())
+                            val images = if (visionEnabled) pendingImage?.let { listOf(it) } ?: emptyList() else emptyList()
+                            onSend(text, images)
                             text = ""
                             onClearImage()
                         },
                         enabled = canSend,
                         shape = CircleShape,
-                        modifier = Modifier.size(40.dp),
+                        modifier = Modifier.size(34.dp),
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = cs.primary,
                             contentColor = cs.onPrimary,
@@ -561,7 +568,7 @@ private fun ChatInput(
                             disabledContentColor = cs.onSurfaceVariant,
                         ),
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.Send, "Отправить", Modifier.size(20.dp))
+                        Icon(Icons.AutoMirrored.Rounded.Send, "Отправить", Modifier.size(17.dp))
                     }
                 }
             }

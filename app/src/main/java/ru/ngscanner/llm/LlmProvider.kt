@@ -75,11 +75,22 @@ data class ToolCall(val id: String, val name: String, val argumentsJson: String)
 @Serializable
 data class ToolResult(val callId: String, val content: String, val isError: Boolean = false)
 
+/** Расход токенов за один ответ модели (для учёта потребления). */
+data class TokenUsage(val prompt: Int, val completion: Int) {
+    val total: Int get() = prompt + completion
+}
+
 /** Результат одного шага диалога с моделью. */
 sealed interface LlmResponse {
+    val usage: TokenUsage?
+
     /** Модель запросила вызов инструментов — их нужно исполнить и вернуть результаты. */
-    data class ToolUse(val text: String?, val calls: List<ToolCall>) : LlmResponse
+    data class ToolUse(
+        val text: String?,
+        val calls: List<ToolCall>,
+        override val usage: TokenUsage? = null,
+    ) : LlmResponse
 
     /** Финальный ответ пользователю. */
-    data class Final(val text: String) : LlmResponse
+    data class Final(val text: String, override val usage: TokenUsage? = null) : LlmResponse
 }

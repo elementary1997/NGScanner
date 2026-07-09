@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import ru.ngscanner.agent.AgentEvent
 import ru.ngscanner.agent.DiagnosticAgent
 import ru.ngscanner.agent.ObdToolExecutor
@@ -50,6 +52,7 @@ import ru.ngscanner.settings.AppSettings
 import ru.ngscanner.settings.ChatRepository
 import ru.ngscanner.settings.FavoritesRepository
 import ru.ngscanner.settings.SessionSummary
+import ru.ngscanner.settings.UsageRepository
 import ru.ngscanner.transport.ClassicSppTransport
 
 enum class ConnectionState { Disconnected, Connecting, Connected }
@@ -101,6 +104,9 @@ data class UiState(
     val availableModels: List<LlmModel> = emptyList(),
     // ключи хранятся в зашифрованном виде (false — редкий фолбэк на plaintext)
     val keysEncrypted: Boolean = true,
+    // расход токенов: за текущую сессию приложения и всего по выбранному провайдеру
+    val sessionTokens: Int = 0,
+    val totalTokens: Long = 0,
     // гараж
     val garage: Garage = Garage(),
     val carSuggestions: List<VehicleSuggestion> = emptyList(),
@@ -126,6 +132,7 @@ private class LoadedState(
     val sessions: List<SessionSummary>,
     val keysEncrypted: Boolean,
     val favorites: List<DeviceUi>,
+    val totalTokens: Long,
     val history: List<LlmMessage>,
 )
 
@@ -143,12 +150,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val normsRepo = ModelNormsRepository(app)
     private val chatRepo = ChatRepository(app)
     private val favoritesRepo = FavoritesRepository(app)
+    private val usageRepo = UsageRepository(app)
 
     private var transport: ClassicSppTransport? = null
     private var elm: Elm327? = null
     private var pollJob: Job? = null
     private var diagnoseJob: Job? = null
     private var searchJob: Job? = null
+    private val favoritesMutex = Mutex() // упорядочивает запись избранного на диск
     private var clearConfirm: CompletableDeferred<Boolean>? = null
     private var supportedPids: Set<String> = emptySet()
     private var lastAddress: String? = null
@@ -177,6 +186,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     sessions = chatRepo.sessions(),
                     keysEncrypted = settings.encrypted,
                     favorites = favoritesRepo.load(),
+                    totalTokens = usageRepo.total(provider),
                     history = chatRepo.loadHistory(),
                 )
             }
@@ -193,9 +203,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val loadGarage = cur.garage == empty.garage
                 cur.copy(
                     provider = if (loadProvider) loaded.provider else cur.provider,
-                    model = if (loadProvider) loaded.model else cur.model,
+                    // Модель можно сменить независимо (setModel без смены провайдера) —
+                    // отдельный гард, чтобы ранний выбор не затёрся снимком с диска.
+                    model = if (cur.model == empty.model) loaded.model else cur.model,
                     hasKey = if (loadProvider) loaded.hasKey else cur.hasKey,
                     apiKey = if (loadProvider) loaded.apiKey else cur.apiKey,
+                    totalTokens = if (loadProvider) loaded.totalTokens else cur.totalTokens,
                     garage = if (loadGarage) loaded.garage else cur.garage,
                     modelNorms = if (loadGarage) loaded.modelNorms else cur.modelNorms,
                     chat = if (cur.chat == empty.chat) loaded.chat else cur.chat,
@@ -259,7 +272,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             st.copy(favorites = favs)
         }.favorites
-        viewModelScope.launch { withContext(Dispatchers.IO) { favoritesRepo.save(updated) } }
+        // Персист под Mutex — запись строго в порядке тапов (без гонки диска и состояния).
+        viewModelScope.launch {
+            favoritesMutex.withLock { withContext(Dispatchers.IO) { favoritesRepo.save(updated) } }
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -462,11 +478,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         diagnoseJob = viewModelScope.launch {
             try {
                 llmHistory = trimLlmHistory(agent.run(text, images, llmHistory, carContext(), adapterConnected = elm != null) { event ->
-                    val msg = when (event) {
-                        is AgentEvent.Assistant -> ChatMessage(ChatRole.ASSISTANT, event.text)
-                        is AgentEvent.ToolCall -> ChatMessage(ChatRole.TOOL, toolStatusText(event.name))
+                    when (event) {
+                        is AgentEvent.Assistant -> appendChat(ChatMessage(ChatRole.ASSISTANT, event.text))
+                        is AgentEvent.ToolCall -> appendChat(ChatMessage(ChatRole.TOOL, toolStatusText(event.name)))
+                        is AgentEvent.Usage -> recordUsage(event.prompt + event.completion)
                     }
-                    appendChat(msg)
                 })
             } catch (ex: CancellationException) {
                 appendChat(ChatMessage(ChatRole.SYSTEM, "Диагностика прервана."))
@@ -624,6 +640,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(chat = it.chat + message) }
     }
 
+    /** Учитывает израсходованные токены: суммирует за сессию приложения и всего по провайдеру. */
+    private fun recordUsage(tokens: Int) {
+        if (tokens <= 0) return
+        val newTotal = usageRepo.add(_ui.value.provider, tokens)
+        _ui.update { it.copy(sessionTokens = it.sessionTokens + tokens, totalTokens = newTotal) }
+    }
+
+    /** Сбрасывает накопленный счётчик токенов текущего провайдера. */
+    fun resetUsage() {
+        usageRepo.reset(_ui.value.provider)
+        _ui.update { it.copy(sessionTokens = 0, totalTokens = 0) }
+    }
+
     private fun buildProvider(id: ProviderId, key: String): LlmProvider = when (id) {
         ProviderId.CLAUDE -> ClaudeProvider(key)
         ProviderId.CLOUD_RU -> CloudRuProvider(key)
@@ -758,6 +787,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val response = provider.send(
             LlmRequest(_ui.value.model, system, listOf(LlmMessage(Role.USER, content = userMsg)), emptyList()),
         )
+        response.usage?.let { recordUsage(it.total) }
         return when (response) {
             is LlmResponse.Final -> response.text.trim().lineSequence().firstOrNull()?.take(80)?.ifBlank { null }
             is LlmResponse.ToolUse -> response.text?.trim()?.take(80)?.ifBlank { null }
@@ -821,6 +851,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 apiKey = settings.apiKey(p),
                 testStatus = null,
                 availableModels = emptyList(),
+                totalTokens = usageRepo.total(p),
             )
         }
     }

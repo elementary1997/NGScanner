@@ -18,10 +18,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.rounded.DataUsage
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -36,8 +38,10 @@ import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +51,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -175,6 +181,8 @@ internal fun SettingsTab(
             }
         }
 
+        UsageCard(ui, providerLabel, onReset = vm::resetUsage)
+
         InfoCard(
             Icons.Rounded.ErrorOutline,
             if (ui.keysEncrypted) {
@@ -242,6 +250,74 @@ private fun CollapsibleCard(
         }
     }
 }
+
+/**
+ * Расход токенов по провайдеру. API отдаёт только потребление токенов (поле usage),
+ * а не денежный баланс — остаток средств пользователь смотрит в личном кабинете, на
+ * который ведёт кнопка.
+ */
+@Composable
+private fun UsageCard(ui: UiState, providerLabel: String, onReset: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val uriHandler = LocalUriHandler.current
+    val (billingUrl, billingLabel) = if (ui.provider == ProviderId.CLOUD_RU) {
+        "https://console.cloud.ru" to "Кабинет Cloud.ru"
+    } else {
+        "https://console.anthropic.com/settings/billing" to "Биллинг Anthropic"
+    }
+    ElevatedCard(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.DataUsage, null, tint = cs.primary)
+                Spacer(Modifier.width(10.dp))
+                Text("Расход · $providerLabel", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                UsageStat("За сессию", formatTokens(ui.sessionTokens.toLong()))
+                UsageStat("Всего", formatTokens(ui.totalTokens))
+            }
+            Text(
+                "API отдаёт расход в токенах, а не деньги — остаток средств смотрите в личном " +
+                    "кабинете провайдера.",
+                style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { uriHandler.openUri(billingUrl) },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Icon(Icons.Rounded.OpenInNew, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(billingLabel, maxLines = 1)
+                }
+                if (ui.totalTokens > 0) {
+                    TextButton(onClick = onReset) { Text("Сбросить") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsageStat(caption: String, value: String) {
+    val cs = MaterialTheme.colorScheme
+    Column {
+        Text(caption.uppercase(), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+        Spacer(Modifier.height(2.dp))
+        Text(
+            value,
+            style = MaterialTheme.typography.titleMedium,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+/** Форматирует число токенов с разделителями разрядов: 1234567 → «1 234 567 ток.». */
+private fun formatTokens(n: Long): String =
+    (if (n >= 1000) "%,d".format(n).replace(',', ' ') else n.toString()) + " ток."
 
 @Composable
 private fun ModelDropdown(models: List<LlmModel>, selected: String, onSelect: (String) -> Unit) {

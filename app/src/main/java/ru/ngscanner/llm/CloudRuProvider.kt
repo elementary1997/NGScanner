@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -175,6 +176,11 @@ class CloudRuProvider(
         val message = choice["message"]?.jsonObject ?: return LlmResponse.Final("")
         val content = message["content"]?.jsonPrimitive?.contentOrNull
         val finish = choice["finish_reason"]?.jsonPrimitive?.contentOrNull
+        val usage = root["usage"]?.jsonObject?.let { u ->
+            val p = u["prompt_tokens"]?.jsonPrimitive?.intOrNull ?: 0
+            val c = u["completion_tokens"]?.jsonPrimitive?.intOrNull ?: 0
+            if (p + c > 0) TokenUsage(p, c) else null
+        }
         val toolCalls = message["tool_calls"]?.jsonArray
         if (!toolCalls.isNullOrEmpty()) {
             // Пропускаем нестандартные элементы, а не роняем весь агентный цикл на !!.
@@ -188,11 +194,11 @@ class CloudRuProvider(
                     argumentsJson = fn["arguments"]?.jsonPrimitive?.contentOrNull ?: "{}",
                 )
             }
-            if (calls.isNotEmpty()) return LlmResponse.ToolUse(content, calls)
+            if (calls.isNotEmpty()) return LlmResponse.ToolUse(content, calls, usage)
         }
         // finish_reason == "length" — ответ обрезан по лимиту токенов; помечаем честно.
         val body = content.orEmpty()
-        return LlmResponse.Final(if (finish == "length") body + TRUNCATION_MARKER else body)
+        return LlmResponse.Final(if (finish == "length") body + TRUNCATION_MARKER else body, usage)
     }
 
     companion object {

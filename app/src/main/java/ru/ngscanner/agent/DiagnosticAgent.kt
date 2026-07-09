@@ -42,6 +42,7 @@ class DiagnosticAgent(
         var steps = 0
         while (steps++ < MAX_STEPS) {
             val response = provider.send(LlmRequest(model, system, messages, ObdTools.all))
+            response.usage?.let { onEvent(AgentEvent.Usage(it.prompt, it.completion)) }
             when (response) {
                 is LlmResponse.Final -> {
                     messages.add(LlmMessage(Role.ASSISTANT, content = response.text))
@@ -100,8 +101,11 @@ class DiagnosticAgent(
     }
 }
 
-/** События агента для отображения в чате. */
+/** События агента для отображения в чате и учёта расхода. */
 sealed interface AgentEvent {
     data class Assistant(val text: String) : AgentEvent
     data class ToolCall(val name: String) : AgentEvent
+
+    /** Расход токенов за один ответ модели. */
+    data class Usage(val prompt: Int, val completion: Int) : AgentEvent
 }
