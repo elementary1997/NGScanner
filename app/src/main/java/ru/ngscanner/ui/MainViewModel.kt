@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import ru.ngscanner.agent.AgentEvent
@@ -86,6 +87,8 @@ data class UiState(
     // диагностика / чат с LLM
     val chat: List<ChatMessage> = emptyList(),
     val diagnosing: Boolean = false,
+    // прикреплённое к вводу фото (в ViewModel — переживает поворот экрана)
+    val pendingImage: LlmImage? = null,
     // архив последних сессий диагностики (для восстановления)
     val sessions: List<SessionSummary> = emptyList(),
     // настройки провайдера
@@ -184,13 +187,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // addCar), было бы молча откачено снимком с диска.
             val empty = UiState()
             _ui.update { cur ->
+                // Парные поля вливаем группой, иначе можно подтянуть устаревшее
+                // companion-значение (modelNorms старой машины; hasKey для чужого ключа).
+                val loadProvider = cur.provider == empty.provider && cur.apiKey == empty.apiKey
+                val loadGarage = cur.garage == empty.garage
                 cur.copy(
-                    provider = if (cur.provider == empty.provider) loaded.provider else cur.provider,
-                    model = if (cur.model == empty.model) loaded.model else cur.model,
-                    hasKey = if (cur.apiKey == empty.apiKey) loaded.hasKey else cur.hasKey,
-                    apiKey = if (cur.apiKey == empty.apiKey) loaded.apiKey else cur.apiKey,
-                    garage = if (cur.garage == empty.garage) loaded.garage else cur.garage,
-                    modelNorms = if (cur.modelNorms == empty.modelNorms) loaded.modelNorms else cur.modelNorms,
+                    provider = if (loadProvider) loaded.provider else cur.provider,
+                    model = if (loadProvider) loaded.model else cur.model,
+                    hasKey = if (loadProvider) loaded.hasKey else cur.hasKey,
+                    apiKey = if (loadProvider) loaded.apiKey else cur.apiKey,
+                    garage = if (loadGarage) loaded.garage else cur.garage,
+                    modelNorms = if (loadGarage) loaded.modelNorms else cur.modelNorms,
                     chat = if (cur.chat == empty.chat) loaded.chat else cur.chat,
                     sessions = if (cur.sessions == empty.sessions) loaded.sessions else cur.sessions,
                     keysEncrypted = loaded.keysEncrypted, // не редактируется пользователем
@@ -241,12 +248,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Добавляет/убирает адаптер из избранного (быстрое подключение на «Приборах»). */
     fun toggleFavorite(device: DeviceUi) {
-        // Запись на диск — вне лямбды update{} (она может повториться на CAS-ретрае, а
-        // toggle не идемпотентна) и на IO.
-        viewModelScope.launch {
-            val updated = withContext(Dispatchers.IO) { favoritesRepo.toggle(device) }
-            _ui.update { it.copy(favorites = updated) }
-        }
+        // Атомарно считаем новый список из состояния (CAS updateAndGet — двойной тап не
+        // теряется), затем персистим результат на IO. Источник истины — состояние, а не
+        // диск, поэтому нет гонки load→modify→save.
+        val updated = _ui.updateAndGet { st ->
+            val favs = if (st.favorites.any { it.address == device.address }) {
+                st.favorites.filterNot { it.address == device.address }
+            } else {
+                st.favorites + device
+            }
+            st.copy(favorites = favs)
+        }.favorites
+        viewModelScope.launch { withContext(Dispatchers.IO) { favoritesRepo.save(updated) } }
     }
 
     @SuppressLint("MissingPermission")
@@ -433,7 +446,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         val shown = if (images.isEmpty()) text else "📷 " + text.ifBlank { "(фото)" }
         appendChat(ChatMessage(ChatRole.USER, shown))
-        _ui.update { it.copy(diagnosing = true) }
+        _ui.update { it.copy(diagnosing = true, pendingImage = null) }
 
         val executor = ObdToolExecutor(
             elm,
@@ -468,6 +481,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (wasPolling && elm != null) startPolling()
             }
         }
+    }
+
+    /** Прикрепляет закодированное фото к вводу (хранится в состоянии до отправки). */
+    fun attachImage(image: LlmImage) {
+        _ui.update { it.copy(pendingImage = image) }
+    }
+
+    /** Убирает прикреплённое фото. */
+    fun clearPendingImage() {
+        _ui.update { it.copy(pendingImage = null) }
     }
 
     /** Прерывает текущую диагностику (в т.ч. зациклившийся на лимите шагов агент). */

@@ -30,7 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,17 +55,18 @@ internal fun DevicesTab(
     onRequestNorm: (ObdPid) -> Unit,
     onOpenConnection: () -> Unit,
 ) {
-    var graphPid by remember { mutableStateOf<ObdPid?>(null) }
-    val graph = graphPid
+    // Имя открытого параметра (String сохраняется в Bundle → график переживает поворот).
+    var graphName by rememberSaveable { mutableStateOf<String?>(null) }
+    val graph = graphName?.let { name -> runCatching { ObdPid.valueOf(name) }.getOrNull() }
     // Полноэкранный график заменяет весь экран вкладки (у него собственный скролл),
     // а не вкладывается в скролл дашборда — иначе вложенные verticalScroll падают.
     if (graph != null && ui.connection == ConnectionState.Connected) {
-        BackHandler { graphPid = null }
+        BackHandler { graphName = null }
         ParameterGraphScreen(
             pid = graph,
             value = ui.metrics[graph],
             history = ui.history,
-            onBack = { graphPid = null },
+            onBack = { graphName = null },
             modelNorm = ui.modelNorms[graph.cmd],
             loading = ui.normLoadingPid == graph.cmd,
             onRequestNorm = onRequestNorm,
@@ -87,7 +88,7 @@ internal fun DevicesTab(
                 metrics = ui.metrics,
                 history = ui.history,
                 onDisconnect = onDisconnect,
-                onOpenGraph = { graphPid = it },
+                onOpenGraph = { graphName = it.name },
             )
             ConnectionState.Connecting -> ConnectingCard()
             ConnectionState.Disconnected -> FavoritesQuickConnect(ui.favorites, onConnect, onOpenConnection)

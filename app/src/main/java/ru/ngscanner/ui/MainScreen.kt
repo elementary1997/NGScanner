@@ -156,6 +156,8 @@ fun MainScreen(vm: MainViewModel) {
                         onCancel = vm::cancelDiagnosis,
                         onLocalDiagnose = vm::localDiagnose,
                         onRestore = vm::restoreSession,
+                        onAttachImage = vm::attachImage,
+                        onClearImage = vm::clearPendingImage,
                     )
                     Tab.Garage -> GarageTab(ui, vm)
                     Tab.Settings -> SettingsTab(

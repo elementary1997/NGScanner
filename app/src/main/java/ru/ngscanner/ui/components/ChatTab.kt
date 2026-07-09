@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.Close
@@ -29,11 +30,13 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material3.TextButton
@@ -52,11 +55,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -89,6 +94,8 @@ internal fun ChatTab(
     onCancel: () -> Unit,
     onLocalDiagnose: () -> Unit,
     onRestore: (String) -> Unit,
+    onAttachImage: (LlmImage) -> Unit,
+    onClearImage: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -134,6 +141,9 @@ internal fun ChatTab(
         ChatInput(
             enabled = !ui.diagnosing,
             visionEnabled = isVisionModel(ui.provider, ui.model),
+            pendingImage = ui.pendingImage,
+            onAttachImage = onAttachImage,
+            onClearImage = onClearImage,
             onSend = onSend,
             onClear = onClear,
             onShare = { shareReport(context, ui.chat, ui.garage.activeCar?.title) },
@@ -173,11 +183,22 @@ private fun flattenMarkdownTables(md: String): String {
     val lines = md.split("\n")
     val out = StringBuilder()
     var i = 0
+    var inFence = false
     while (i < lines.size) {
-        val header = lines[i]
+        val line = lines[i]
+        val trimmed = line.trimStart()
+        // Ограждённые блоки кода (``` / ~~~): внутри строки с | — это код, не таблица.
+        if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+            inFence = !inFence
+            out.append(line).append('\n')
+            i++
+            continue
+        }
         val sep = lines.getOrNull(i + 1)
-        if (isTableRow(header) && sep != null && isTableSeparator(sep)) {
-            val headers = tableCells(header)
+        // Настоящая таблица = заголовок + разделитель + хотя бы одна строка тела.
+        val hasBody = lines.getOrNull(i + 2)?.let { isTableRow(it) } == true
+        if (!inFence && isTableRow(line) && sep != null && isTableSeparator(sep) && hasBody) {
+            val headers = tableCells(line)
             i += 2 // пропускаем строку заголовков и разделитель |---|
             while (i < lines.size && isTableRow(lines[i])) {
                 val cells = tableCells(lines[i])
@@ -191,7 +212,7 @@ private fun flattenMarkdownTables(md: String): String {
                 i++
             }
         } else {
-            out.append(header).append('\n')
+            out.append(line).append('\n')
             i++
         }
     }
@@ -385,7 +406,13 @@ private fun ChatBubble(msg: ChatMessage) {
             modifier = Modifier
                 .align(alignment)
                 .fillMaxWidth(widthFraction)
-                .combinedClickable(onClick = {}, onLongClick = copy),
+                // Долгое нажатие = копировать; без ripple по всей плашке ответа.
+                .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                    onLongClick = copy,
+                ),
             shape = RoundedCornerShape(16.dp),
             color = bg,
         ) {
@@ -404,6 +431,9 @@ private fun ChatBubble(msg: ChatMessage) {
 private fun ChatInput(
     enabled: Boolean,
     visionEnabled: Boolean,
+    pendingImage: LlmImage?,
+    onAttachImage: (LlmImage) -> Unit,
+    onClearImage: () -> Unit,
     onSend: (String, List<LlmImage>) -> Unit,
     onClear: () -> Unit,
     onShare: () -> Unit,
@@ -411,69 +441,101 @@ private fun ChatInput(
     hasChat: Boolean,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
-    var image by remember { mutableStateOf<LlmImage?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) scope.launch { image = ImageEncoder.encode(context, uri) }
+        // Кодируем выбранное фото и кладём в состояние ViewModel (переживает поворот).
+        if (uri != null) scope.launch { ImageEncoder.encode(context, uri)?.let(onAttachImage) }
     }
 
+    val cs = MaterialTheme.colorScheme
     // Панель ввода поднимается над клавиатурой. Навбар уже съеден consumeWindowInsets
     // на уровне контента, поэтому imePadding даёт ровно высоту клавиатуры без двойного отступа.
     Surface(modifier = Modifier.imePadding(), tonalElevation = 3.dp) {
-        Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            if (image != null) {
+        Column(Modifier.fillMaxWidth()) {
+            HorizontalDivider(color = cs.outlineVariant.copy(alpha = 0.6f))
+
+            // Действия над диалогом — тонкая строка справа, чтобы не тесниться в поле ввода.
+            if (hasChat || canShare) {
                 Row(
-                    modifier = Modifier.padding(bottom = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Rounded.Image, null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Фото прикреплено",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(onClick = { image = null }) {
-                        Icon(Icons.Rounded.Close, "Убрать фото", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (canShare) {
+                        TextButton(onClick = onShare, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
+                            Icon(Icons.Rounded.IosShare, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Поделиться", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                    if (hasChat) {
+                        TextButton(onClick = onClear, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
+                            Icon(Icons.Rounded.DeleteSweep, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Новый диалог", style = MaterialTheme.typography.labelMedium)
+                        }
                     }
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (hasChat) {
-                    IconButton(onClick = onClear) {
-                        Icon(Icons.Rounded.DeleteSweep, "Очистить чат", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            // Прикреплённое фото — компактный чип.
+            if (pendingImage != null) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = cs.surfaceVariant,
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Rounded.Image, null, Modifier.size(18.dp), tint = cs.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Фото прикреплено", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                        IconButton(onClick = onClearImage, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Rounded.Close, "Убрать фото", Modifier.size(18.dp), tint = cs.onSurfaceVariant)
+                        }
                     }
                 }
-                if (canShare) {
-                    IconButton(onClick = onShare) {
-                        Icon(Icons.Rounded.IosShare, "Поделиться отчётом", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 6.dp, end = 10.dp, top = 8.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 if (visionEnabled) {
                     IconButton(onClick = {
                         picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     }) {
-                        Icon(Icons.Rounded.AddPhotoAlternate, "Прикрепить фото", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(Icons.Rounded.AddPhotoAlternate, "Прикрепить фото", tint = cs.onSurfaceVariant)
                     }
+                } else {
+                    Spacer(Modifier.width(6.dp))
                 }
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Опишите проблему…") },
-                    maxLines = 4,
-                    shape = RoundedCornerShape(24.dp),
+                    placeholder = { Text("Опишите проблему или вопрос…") },
+                    maxLines = 5,
+                    shape = RoundedCornerShape(26.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = cs.surfaceVariant.copy(alpha = 0.45f),
+                        unfocusedContainerColor = cs.surfaceVariant.copy(alpha = 0.45f),
+                        focusedBorderColor = cs.primary,
+                        unfocusedBorderColor = Color.Transparent,
+                    ),
                 )
                 Spacer(Modifier.width(8.dp))
                 FilledIconButton(
                     onClick = {
-                        onSend(text, image?.let { listOf(it) } ?: emptyList())
+                        onSend(text, pendingImage?.let { listOf(it) } ?: emptyList())
                         text = ""
-                        image = null
+                        onClearImage()
                     },
-                    enabled = enabled && (text.isNotBlank() || image != null),
+                    enabled = enabled && (text.isNotBlank() || pendingImage != null),
+                    shape = CircleShape,
                 ) {
                     Icon(Icons.AutoMirrored.Rounded.Send, "Отправить")
                 }

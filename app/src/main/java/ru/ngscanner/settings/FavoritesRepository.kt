@@ -21,16 +21,9 @@ class FavoritesRepository(context: Context) {
         return runCatching { json.decodeFromString<List<DeviceUi>>(raw) }.getOrDefault(emptyList())
     }
 
-    /** Добавляет адаптер в избранное или убирает его (по адресу). Возвращает новый список. */
-    fun toggle(device: DeviceUi): List<DeviceUi> {
-        val current = load()
-        val updated = if (current.any { it.address == device.address }) {
-            current.filterNot { it.address == device.address }
-        } else {
-            current + device
-        }
-        prefs.edit().putString(KEY, json.encodeToString(updated)).apply()
-        return updated
+    /** Сохраняет полный список избранного (источник истины — состояние ViewModel). */
+    fun save(favorites: List<DeviceUi>) {
+        prefs.edit().putString(KEY, json.encodeToString(favorites)).apply()
     }
 
     private companion object {
