@@ -2,8 +2,10 @@
 
 package ru.ngscanner.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,6 +19,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
@@ -24,6 +28,7 @@ import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -37,7 +42,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -58,76 +65,85 @@ internal fun SettingsTab(ui: UiState, vm: MainViewModel) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Провайдер LLM", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
-                selected = ui.provider == ProviderId.CLAUDE,
-                onClick = { vm.setProvider(ProviderId.CLAUDE) },
-                label = { Text("Anthropic Claude") },
-            )
-            FilterChip(
-                selected = ui.provider == ProviderId.CLOUD_RU,
-                onClick = { vm.setProvider(ProviderId.CLOUD_RU) },
-                label = { Text("Cloud.ru") },
-            )
-        }
-
-        OutlinedTextField(
-            value = keyText,
-            onValueChange = { keyText = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("API-ключ") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-        )
-
-        Button(
-            onClick = { vm.testConnection(keyText) },
-            enabled = !ui.testing && keyText.isNotBlank(),
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            shape = RoundedCornerShape(16.dp),
+        val providerLabel = if (ui.provider == ProviderId.CLAUDE) "Anthropic Claude" else "Cloud.ru"
+        val keyStatus = if (ui.hasKey) "ключ сохранён" else "ключ не задан"
+        // Блок провайдера сворачиваем: когда всё настроено — не занимает экран;
+        // раскрыт по умолчанию, пока ключ не задан (первичная настройка).
+        CollapsibleCard(
+            title = "Провайдер LLM",
+            summary = "$providerLabel · ${ui.model} · $keyStatus",
+            initiallyExpanded = !ui.hasKey,
         ) {
-            if (ui.testing) {
-                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-            } else {
-                Icon(Icons.Rounded.Bolt, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Тест подключения")
-            }
-        }
-
-        when (val st = ui.testStatus) {
-            is TestStatus.Success -> Text(
-                "✓ Подключение успешно — выберите модель ниже",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            is TestStatus.Error -> Text(
-                "✗ ${st.message}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-            null -> if (ui.hasKey) {
-                Text(
-                    "Ключ сохранён. Нажмите «Тест», чтобы загрузить список моделей.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = ui.provider == ProviderId.CLAUDE,
+                    onClick = { vm.setProvider(ProviderId.CLAUDE) },
+                    label = { Text("Anthropic Claude") },
+                )
+                FilterChip(
+                    selected = ui.provider == ProviderId.CLOUD_RU,
+                    onClick = { vm.setProvider(ProviderId.CLOUD_RU) },
+                    label = { Text("Cloud.ru") },
                 )
             }
-        }
 
-        if (ui.availableModels.isNotEmpty()) {
-            ModelDropdown(ui.availableModels, ui.model, vm::setModel)
-        } else {
-            // Список ещё не загружен, но выбранная модель сохранена — показываем её.
             OutlinedTextField(
-                value = ui.model,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Текущая модель") },
+                value = keyText,
+                onValueChange = { keyText = it },
                 modifier = Modifier.fillMaxWidth(),
-                supportingText = { Text("Нажмите «Тест», чтобы выбрать другую модель") },
+                label = { Text("API-ключ") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
             )
+
+            Button(
+                onClick = { vm.testConnection(keyText) },
+                enabled = !ui.testing && keyText.isNotBlank(),
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                if (ui.testing) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                } else {
+                    Icon(Icons.Rounded.Bolt, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Тест подключения")
+                }
+            }
+
+            when (val st = ui.testStatus) {
+                is TestStatus.Success -> Text(
+                    "✓ Подключение успешно — выберите модель ниже",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                is TestStatus.Error -> Text(
+                    "✗ ${st.message}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                null -> if (ui.hasKey) {
+                    Text(
+                        "Ключ сохранён. Нажмите «Тест», чтобы загрузить список моделей.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (ui.availableModels.isNotEmpty()) {
+                ModelDropdown(ui.availableModels, ui.model, vm::setModel)
+            } else {
+                // Список ещё не загружен, но выбранная модель сохранена — показываем её.
+                OutlinedTextField(
+                    value = ui.model,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Текущая модель") },
+                    modifier = Modifier.fillMaxWidth(),
+                    supportingText = { Text("Нажмите «Тест», чтобы выбрать другую модель") },
+                )
+            }
         }
 
         InfoCard(
@@ -141,6 +157,55 @@ internal fun SettingsTab(ui: UiState, vm: MainViewModel) {
                 "Тексты диалога передаются провайдеру модели, а VIN при распознавании — сервису " +
                 "NHTSA (США): это трансграничная передача данных. Не вводите персональные данные.",
         )
+    }
+}
+
+/**
+ * Карточка-секция настроек с заголовком и сворачиваемым содержимым. В свёрнутом
+ * виде показывает краткую сводку (summary), чтобы не терять контекст.
+ */
+@Composable
+private fun CollapsibleCard(
+    title: String,
+    summary: String,
+    initiallyExpanded: Boolean,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+    ElevatedCard(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                if (!expanded) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        summary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Icon(
+                if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                if (expanded) "Свернуть" else "Развернуть",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 20.dp, bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                content = content,
+            )
+        }
     }
 }
 

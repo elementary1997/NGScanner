@@ -159,8 +159,8 @@ private fun EmptyChatHint(onSend: (String) -> Unit, onLocalDiagnose: () -> Unit)
         Icon(Icons.Rounded.HealthAndSafety, null, Modifier.size(52.dp), tint = cs.primary)
         Text("Диагностика через LLM", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text(
-            "Опишите симптом или выберите частую жалобу — модель прочитает коды и параметры " +
-                "с адаптера и даст понятный вердикт.",
+            "Опишите симптом или задайте любой вопрос об авто. С подключённым адаптером модель " +
+                "прочитает коды и параметры и даст вердикт; без адаптера — ответит на общие вопросы.",
             style = MaterialTheme.typography.bodyMedium,
             color = cs.onSurfaceVariant,
             textAlign = TextAlign.Center,

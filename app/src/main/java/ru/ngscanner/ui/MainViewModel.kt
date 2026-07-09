@@ -359,7 +359,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         stopPolling()
         diagnoseJob = viewModelScope.launch {
             try {
-                llmHistory = agent.run(text, images, llmHistory, carContext()) { event ->
+                llmHistory = agent.run(text, images, llmHistory, carContext(), adapterConnected = elm != null) { event ->
                     val msg = when (event) {
                         is AgentEvent.Assistant -> ChatMessage(ChatRole.ASSISTANT, event.text)
                         is AgentEvent.ToolCall -> ChatMessage(ChatRole.TOOL, toolStatusText(event.name))
