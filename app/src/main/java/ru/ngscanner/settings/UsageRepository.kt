@@ -1,33 +1,76 @@
 package ru.ngscanner.settings
 
 import android.content.Context
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import ru.ngscanner.llm.ProviderId
 
+/** Расход по одной модели: токены (prompt/completion) и число запросов. */
+@Serializable
+data class ModelUsage(
+    val model: String,
+    val prompt: Long = 0,
+    val completion: Long = 0,
+    val requests: Int = 0,
+) {
+    val total: Long get() = prompt + completion
+}
+
 /**
- * Накопленный расход токенов по провайдерам. API отдаёт только потребление
- * токенов (поле `usage` в ответе), а не денежный баланс аккаунта — деньги видны
- * в личном кабинете провайдера. Здесь копим суммарные токены для показа.
+ * Помодельный расход токенов по провайдерам и заданные пользователем цены
+ * (₽ за 1 млн токенов). API отдаёт только потребление токенов (поле usage), а
+ * не денежный баланс — сумму оцениваем по цене, которую пользователь берёт из
+ * своего тарифа; остаток средств виден в личном кабинете провайдера.
  */
 class UsageRepository(context: Context) {
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val json = Json { ignoreUnknownKeys = true }
 
-    fun total(provider: ProviderId): Long = prefs.getLong(key(provider), 0L)
+    fun models(provider: ProviderId): List<ModelUsage> {
+        val raw = prefs.getString(modelsKey(provider), null) ?: return emptyList()
+        return runCatching { json.decodeFromString<List<ModelUsage>>(raw) }.getOrDefault(emptyList())
+    }
 
-    /** Прибавляет израсходованные токены и возвращает новый суммарный итог. */
-    fun add(provider: ProviderId, tokens: Int): Long {
-        val updated = total(provider) + tokens
-        prefs.edit().putLong(key(provider), updated).apply()
-        return updated
+    /** Прибавляет расход модели и возвращает обновлённый список (по убыванию токенов). */
+    fun add(provider: ProviderId, model: String, prompt: Int, completion: Int): List<ModelUsage> {
+        val list = models(provider).toMutableList()
+        val i = list.indexOfFirst { it.model == model }
+        if (i >= 0) {
+            val u = list[i]
+            list[i] = u.copy(prompt = u.prompt + prompt, completion = u.completion + completion, requests = u.requests + 1)
+        } else {
+            list.add(ModelUsage(model, prompt.toLong(), completion.toLong(), 1))
+        }
+        val sorted = list.sortedByDescending { it.total }
+        prefs.edit().putString(modelsKey(provider), json.encodeToString(sorted)).apply()
+        return sorted
     }
 
     fun reset(provider: ProviderId) {
-        prefs.edit().remove(key(provider)).apply()
+        prefs.edit().remove(modelsKey(provider)).apply()
     }
 
-    private fun key(p: ProviderId) = "tokens_${p.name}"
+    /** Цены ₽ за 1 млн токенов по id модели (общая карта для всех провайдеров). */
+    fun prices(): Map<String, Double> {
+        val raw = prefs.getString(KEY_PRICES, null) ?: return emptyMap()
+        return runCatching { json.decodeFromString<Map<String, Double>>(raw) }.getOrDefault(emptyMap())
+    }
+
+    /** Задаёт цену модели (0 или меньше — убирает) и возвращает обновлённую карту. */
+    fun setPrice(model: String, rubPerMillion: Double): Map<String, Double> {
+        val m = prices().toMutableMap()
+        if (rubPerMillion > 0) m[model] = rubPerMillion else m.remove(model)
+        prefs.edit().putString(KEY_PRICES, json.encodeToString(m)).apply()
+        return m
+    }
+
+    private fun modelsKey(p: ProviderId) = "models_${p.name}"
 
     private companion object {
         const val PREFS = "ngscanner_usage"
+        const val KEY_PRICES = "prices"
     }
 }

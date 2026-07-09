@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandLess
@@ -35,6 +36,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -53,10 +55,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import ru.ngscanner.llm.LlmModel
 import ru.ngscanner.llm.ProviderId
+import ru.ngscanner.settings.ModelUsage
 import ru.ngscanner.ui.ConnectionState
 import ru.ngscanner.ui.UiState
 import ru.ngscanner.ui.MainViewModel
@@ -180,12 +184,13 @@ internal fun SettingsTab(
             }
         }
 
+        val totalTokens = ui.modelUsage.sumOf { it.total }
         CollapsibleCard(
             title = "Расход · $providerLabel",
-            summary = "всего ${formatTokens(ui.totalTokens)}",
+            summary = "всего ${formatTokens(totalTokens)} ток.",
             initiallyExpanded = false,
         ) {
-            UsageContent(ui, onReset = vm::resetUsage)
+            UsageContent(ui, onReset = vm::resetUsage, onSetPrice = vm::setModelPrice)
         }
 
         CollapsibleCard(
@@ -198,9 +203,13 @@ internal fun SettingsTab(
     }
 }
 
-/** Содержимое сворачиваемой секции «Расход» (без внешней карточки — её даёт CollapsibleCard). */
+/**
+ * Содержимое сворачиваемой секции «Расход»: помодельная статистика (токены,
+ * запросы) и оценка суммы по цене, которую пользователь задаёт из своего тарифа
+ * (API денег не отдаёт). Без внешней карточки — её даёт CollapsibleCard.
+ */
 @Composable
-private fun UsageContent(ui: UiState, onReset: () -> Unit) {
+private fun UsageContent(ui: UiState, onReset: () -> Unit, onSetPrice: (String, Double) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val uriHandler = LocalUriHandler.current
     val (billingUrl, billingLabel) = if (ui.provider == ProviderId.CLOUD_RU) {
@@ -208,12 +217,31 @@ private fun UsageContent(ui: UiState, onReset: () -> Unit) {
     } else {
         "https://console.anthropic.com/settings/billing" to "Биллинг Anthropic"
     }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-        UsageStat("За сессию", formatTokens(ui.sessionTokens.toLong()))
-        UsageStat("Всего", formatTokens(ui.totalTokens))
+    val totalTokens = ui.modelUsage.sumOf { it.total }
+    val totalCost = ui.modelUsage.sumOf { (it.total / 1_000_000.0) * (ui.modelPrices[it.model] ?: 0.0) }
+
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+        UsageStat("За сессию", "${formatTokens(ui.sessionTokens.toLong())} ток.")
+        UsageStat("Всего", "${formatTokens(totalTokens)} ток.")
+        if (totalCost > 0) UsageStat("Сумма ≈", "${formatRub(totalCost)} ₽")
     }
+
+    if (ui.modelUsage.isEmpty()) {
+        Text(
+            "Расхода пока нет — появится после первого запроса к модели.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = cs.onSurfaceVariant,
+        )
+    } else {
+        HorizontalDivider(color = cs.outlineVariant)
+        ui.modelUsage.forEach { usage ->
+            ModelUsageRow(usage, ui.modelPrices[usage.model] ?: 0.0, onSetPrice)
+        }
+    }
+
     Text(
-        "API отдаёт расход в токенах, а не деньги — остаток средств смотрите в личном кабинете провайдера.",
+        "API отдаёт расход в токенах, а не деньги. Укажите цену модели из своего тарифа " +
+            "(₽ за 1 млн токенов) — посчитаем сумму; точный остаток средств смотрите в кабинете провайдера.",
         style = MaterialTheme.typography.bodySmall,
         color = cs.onSurfaceVariant,
     )
@@ -227,9 +255,56 @@ private fun UsageContent(ui: UiState, onReset: () -> Unit) {
             Spacer(Modifier.width(8.dp))
             Text(billingLabel, maxLines = 1)
         }
-        if (ui.totalTokens > 0) {
+        if (totalTokens > 0) {
             TextButton(onClick = onReset) { Text("Сбросить") }
         }
+    }
+}
+
+/** Строка одной модели: название, токены/запросы, оценка суммы и поле цены. */
+@Composable
+private fun ModelUsageRow(usage: ModelUsage, price: Double, onSetPrice: (String, Double) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var priceText by remember(usage.model, price) { mutableStateOf(if (price > 0) formatPrice(price) else "") }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    usage.model.substringAfterLast('/'),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                Text(
+                    "${formatTokens(usage.total)} ток · ${usage.requests} запр.",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = cs.onSurfaceVariant,
+                )
+            }
+            if (price > 0) {
+                Text(
+                    "≈ ${formatRub((usage.total / 1_000_000.0) * price)} ₽",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    color = cs.primary,
+                )
+            }
+        }
+        OutlinedTextField(
+            value = priceText,
+            onValueChange = { v ->
+                val filtered = v.filter { it.isDigit() || it == '.' || it == ',' }.take(9)
+                priceText = filtered
+                onSetPrice(usage.model, filtered.replace(',', '.').toDoubleOrNull() ?: 0.0)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Цена, ₽ за 1 млн токенов") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            shape = RoundedCornerShape(12.dp),
+        )
     }
 }
 
@@ -318,9 +393,17 @@ private fun UsageStat(caption: String, value: String) {
     }
 }
 
-/** Форматирует число токенов с разделителями разрядов: 1234567 → «1 234 567 ток.». */
+/** «1234567» → «1 234 567» (разделители разрядов). */
 private fun formatTokens(n: Long): String =
-    (if (n >= 1000) "%,d".format(n).replace(',', ' ') else n.toString()) + " ток."
+    if (n >= 1000) "%,d".format(n).replace(',', ' ') else n.toString()
+
+/** Сумма в рублях: пробел-разряды, запятая-десятичные (1234.5 → «1 234,50»). */
+private fun formatRub(d: Double): String =
+    String.format(java.util.Locale.US, "%,.2f", d).replace(',', ' ').replace('.', ',')
+
+/** Цена без хвостовых нулей для поля ввода (1500.0 → «1500», 12.5 → «12.5»). */
+private fun formatPrice(d: Double): String =
+    if (d == d.toLong().toDouble()) d.toLong().toString() else d.toString()
 
 @Composable
 private fun ModelDropdown(models: List<LlmModel>, selected: String, onSelect: (String) -> Unit) {

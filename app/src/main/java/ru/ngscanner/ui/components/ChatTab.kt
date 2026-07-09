@@ -10,13 +10,15 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import ru.ngscanner.llm.LlmImage
+import ru.ngscanner.util.Exporter
 import ru.ngscanner.util.ImageEncoder
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,14 +45,15 @@ import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CloudOff
-import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.HealthAndSafety
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -101,7 +104,6 @@ internal fun ChatTab(
     onClearImage: () -> Unit,
 ) {
     val listState = rememberLazyListState()
-    val context = LocalContext.current
     val visionEnabled = isVisionModel(ui.provider, ui.model)
     // Переключились на модель без vision (напр. Cloud.ru) — прикреплённое фото
     // сбрасываем, иначе отправка ушла бы в API с ошибкой.
@@ -154,32 +156,8 @@ internal fun ChatTab(
             onAttachImage = onAttachImage,
             onClearImage = onClearImage,
             onSend = onSend,
-            onClear = onClear,
-            onShare = { shareReport(context, ui.chat, ui.garage.activeCar?.title) },
-            canShare = ui.chat.any { it.role == ChatRole.ASSISTANT },
-            hasChat = ui.chat.isNotEmpty(),
         )
     }
-}
-
-/** Собирает диалог в текстовый отчёт и открывает системный «Поделиться». */
-private fun shareReport(context: android.content.Context, chat: List<ChatMessage>, carTitle: String?) {
-    val sb = StringBuilder("Диагностика NG Scanner")
-    carTitle?.let { sb.append(" — ").append(it) }
-    sb.append("\n\n")
-    for (m in chat) {
-        when (m.role) {
-            ChatRole.USER -> sb.append("❓ ").append(m.text).append("\n\n")
-            ChatRole.ASSISTANT -> sb.append(m.text).append("\n\n")
-            else -> Unit
-        }
-    }
-    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-        type = "text/plain"
-        putExtra(android.content.Intent.EXTRA_SUBJECT, "Диагностика авто — NG Scanner")
-        putExtra(android.content.Intent.EXTRA_TEXT, sb.toString().trim())
-    }
-    context.startActivity(android.content.Intent.createChooser(intent, "Поделиться отчётом"))
 }
 
 /**
@@ -404,33 +382,61 @@ private fun ChatBubble(msg: ChatMessage) {
     val widthFraction = if (msg.role == ChatRole.ASSISTANT) 1f else 0.9f
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
-    // Долгое нажатие копирует текст сообщения — удобно переслать свой вопрос заново,
-    // если запрос сорвался (нет сети), не перепечатывая его руками.
-    val copy = {
-        clipboard.setText(AnnotatedString(msg.text))
-        Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
-    }
+    val scope = rememberCoroutineScope()
+    var menuOpen by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth()) {
-        Surface(
-            modifier = Modifier
-                .align(alignment)
-                .fillMaxWidth(widthFraction)
-                // Долгое нажатие = копировать; без ripple по всей плашке ответа.
-                .combinedClickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = {},
-                    onLongClick = copy,
-                ),
-            shape = RoundedCornerShape(16.dp),
-            color = bg,
-        ) {
-            if (msg.role == ChatRole.ASSISTANT) {
-                // Markdown-ответ модели рендерится; широкие таблицы предварительно
-                // сплющиваются в список, иначе на узком экране их не прочитать.
-                Markdown(content = flattenMarkdownTables(msg.text), modifier = Modifier.padding(14.dp))
-            } else {
-                Text(msg.text, Modifier.padding(14.dp), color = fg, style = MaterialTheme.typography.bodyMedium)
+        Box(Modifier.align(alignment).fillMaxWidth(widthFraction)) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // Долгое нажатие — меню действий (копировать/поделиться/PDF), без ripple.
+                    .combinedClickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                        onLongClick = { menuOpen = true },
+                    ),
+                shape = RoundedCornerShape(16.dp),
+                color = bg,
+            ) {
+                if (msg.role == ChatRole.ASSISTANT) {
+                    // Markdown-ответ модели рендерится; широкие таблицы предварительно
+                    // сплющиваются в список, иначе на узком экране их не прочитать.
+                    Markdown(content = flattenMarkdownTables(msg.text), modifier = Modifier.padding(14.dp))
+                } else {
+                    Text(msg.text, Modifier.padding(14.dp), color = fg, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Копировать") },
+                    leadingIcon = { Icon(Icons.Rounded.ContentCopy, null) },
+                    onClick = {
+                        menuOpen = false
+                        clipboard.setText(AnnotatedString(msg.text))
+                        Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Поделиться") },
+                    leadingIcon = { Icon(Icons.Rounded.IosShare, null) },
+                    onClick = { menuOpen = false; Exporter.shareText(context, msg.text) },
+                )
+                if (msg.role == ChatRole.ASSISTANT) {
+                    DropdownMenuItem(
+                        text = { Text("Сохранить в PDF") },
+                        leadingIcon = { Icon(Icons.Rounded.PictureAsPdf, null) },
+                        onClick = {
+                            menuOpen = false
+                            scope.launch {
+                                val uri = withContext(Dispatchers.IO) {
+                                    Exporter.buildPdf(context, "Ответ NG Scanner", msg.text, msg.text.hashCode().toLong())
+                                }
+                                Exporter.sharePdf(context, uri)
+                            }
+                        },
+                    )
+                }
             }
         }
     }
@@ -444,10 +450,6 @@ private fun ChatInput(
     onAttachImage: (LlmImage) -> Unit,
     onClearImage: () -> Unit,
     onSend: (String, List<LlmImage>) -> Unit,
-    onClear: () -> Unit,
-    onShare: () -> Unit,
-    canShare: Boolean,
-    hasChat: Boolean,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
     val context = LocalContext.current
@@ -458,11 +460,9 @@ private fun ChatInput(
     }
 
     val cs = MaterialTheme.colorScheme
-    var menuOpen by remember { mutableStateOf(false) }
-    val hasMenu = visionEnabled || hasChat || canShare
     val canSend = enabled && (text.isNotBlank() || pendingImage != null)
 
-    // Одна компактная «пилюля»: «+» (вторичные действия), поле на BasicTextField
+    // Одна компактная «пилюля»: «+» прикладывает вложение, поле на BasicTextField
     // (без тяжёлого хрома Material) и круглая кнопка отправки. imePadding поднимает
     // панель над клавиатурой без двойного отступа (навбар съеден consumeWindowInsets).
     Surface(modifier = Modifier.imePadding(), color = cs.surface) {
@@ -493,37 +493,13 @@ private fun ChatInput(
                     modifier = Modifier.fillMaxWidth().padding(4.dp),
                     verticalAlignment = Alignment.Bottom,
                 ) {
-                    if (hasMenu) {
-                        Box {
-                            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(38.dp)) {
-                                Icon(Icons.Rounded.Add, "Действия", Modifier.size(22.dp), tint = cs.onSurfaceVariant)
-                            }
-                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                if (visionEnabled) {
-                                    DropdownMenuItem(
-                                        text = { Text("Прикрепить фото") },
-                                        leadingIcon = { Icon(Icons.Rounded.AddPhotoAlternate, null) },
-                                        onClick = {
-                                            menuOpen = false
-                                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                        },
-                                    )
-                                }
-                                if (hasChat) {
-                                    DropdownMenuItem(
-                                        text = { Text("Новый диалог") },
-                                        leadingIcon = { Icon(Icons.Rounded.DeleteSweep, null) },
-                                        onClick = { menuOpen = false; onClear() },
-                                    )
-                                }
-                                if (canShare) {
-                                    DropdownMenuItem(
-                                        text = { Text("Поделиться") },
-                                        leadingIcon = { Icon(Icons.Rounded.IosShare, null) },
-                                        onClick = { menuOpen = false; onShare() },
-                                    )
-                                }
-                            }
+                    // «+» — прикрепить вложение (фото). Доступно только для vision-моделей.
+                    if (visionEnabled) {
+                        IconButton(
+                            onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                            modifier = Modifier.size(38.dp),
+                        ) {
+                            Icon(Icons.Rounded.Add, "Прикрепить вложение", Modifier.size(22.dp), tint = cs.onSurfaceVariant)
                         }
                     } else {
                         Spacer(Modifier.width(16.dp))
@@ -568,7 +544,8 @@ private fun ChatInput(
                             disabledContentColor = cs.onSurfaceVariant,
                         ),
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.Send, "Отправить", Modifier.size(17.dp))
+                        // Стрелка вверх центрируется ровно (в отличие от «бумажного самолётика»).
+                        Icon(Icons.Rounded.ArrowUpward, "Отправить", Modifier.size(19.dp))
                     }
                 }
             }

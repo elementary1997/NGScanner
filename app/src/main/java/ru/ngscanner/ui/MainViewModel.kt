@@ -51,6 +51,7 @@ import ru.ngscanner.service.ObdForegroundService
 import ru.ngscanner.settings.AppSettings
 import ru.ngscanner.settings.ChatRepository
 import ru.ngscanner.settings.FavoritesRepository
+import ru.ngscanner.settings.ModelUsage
 import ru.ngscanner.settings.SessionSummary
 import ru.ngscanner.settings.UsageRepository
 import ru.ngscanner.transport.ClassicSppTransport
@@ -104,9 +105,10 @@ data class UiState(
     val availableModels: List<LlmModel> = emptyList(),
     // ключи хранятся в зашифрованном виде (false — редкий фолбэк на plaintext)
     val keysEncrypted: Boolean = true,
-    // расход токенов: за текущую сессию приложения и всего по выбранному провайдеру
+    // расход токенов: за сессию приложения (сумма) и помодельно по провайдеру + цены
     val sessionTokens: Int = 0,
-    val totalTokens: Long = 0,
+    val modelUsage: List<ModelUsage> = emptyList(),
+    val modelPrices: Map<String, Double> = emptyMap(),
     // гараж
     val garage: Garage = Garage(),
     val carSuggestions: List<VehicleSuggestion> = emptyList(),
@@ -132,7 +134,8 @@ private class LoadedState(
     val sessions: List<SessionSummary>,
     val keysEncrypted: Boolean,
     val favorites: List<DeviceUi>,
-    val totalTokens: Long,
+    val modelUsage: List<ModelUsage>,
+    val modelPrices: Map<String, Double>,
     val history: List<LlmMessage>,
 )
 
@@ -186,7 +189,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     sessions = chatRepo.sessions(),
                     keysEncrypted = settings.encrypted,
                     favorites = favoritesRepo.load(),
-                    totalTokens = usageRepo.total(provider),
+                    modelUsage = usageRepo.models(provider),
+                    modelPrices = usageRepo.prices(),
                     history = chatRepo.loadHistory(),
                 )
             }
@@ -208,7 +212,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     model = if (cur.model == empty.model) loaded.model else cur.model,
                     hasKey = if (loadProvider) loaded.hasKey else cur.hasKey,
                     apiKey = if (loadProvider) loaded.apiKey else cur.apiKey,
-                    totalTokens = if (loadProvider) loaded.totalTokens else cur.totalTokens,
+                    modelUsage = if (loadProvider) loaded.modelUsage else cur.modelUsage,
+                    modelPrices = if (cur.modelPrices == empty.modelPrices) loaded.modelPrices else cur.modelPrices,
                     garage = if (loadGarage) loaded.garage else cur.garage,
                     modelNorms = if (loadGarage) loaded.modelNorms else cur.modelNorms,
                     chat = if (cur.chat == empty.chat) loaded.chat else cur.chat,
@@ -481,7 +486,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     when (event) {
                         is AgentEvent.Assistant -> appendChat(ChatMessage(ChatRole.ASSISTANT, event.text))
                         is AgentEvent.ToolCall -> appendChat(ChatMessage(ChatRole.TOOL, toolStatusText(event.name)))
-                        is AgentEvent.Usage -> recordUsage(event.prompt + event.completion)
+                        is AgentEvent.Usage -> recordUsage(event.prompt, event.completion)
                     }
                 })
             } catch (ex: CancellationException) {
@@ -640,17 +645,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(chat = it.chat + message) }
     }
 
-    /** Учитывает израсходованные токены: суммирует за сессию приложения и всего по провайдеру. */
-    private fun recordUsage(tokens: Int) {
+    /** Учитывает израсходованные токены помодельно: сессия (сумма) + расход текущей модели. */
+    private fun recordUsage(prompt: Int, completion: Int) {
+        val tokens = prompt + completion
         if (tokens <= 0) return
-        val newTotal = usageRepo.add(_ui.value.provider, tokens)
-        _ui.update { it.copy(sessionTokens = it.sessionTokens + tokens, totalTokens = newTotal) }
+        val updated = usageRepo.add(_ui.value.provider, _ui.value.model, prompt, completion)
+        _ui.update { it.copy(sessionTokens = it.sessionTokens + tokens, modelUsage = updated) }
     }
 
-    /** Сбрасывает накопленный счётчик токенов текущего провайдера. */
+    /** Сбрасывает помодельный счётчик расхода текущего провайдера. */
     fun resetUsage() {
         usageRepo.reset(_ui.value.provider)
-        _ui.update { it.copy(sessionTokens = 0, totalTokens = 0) }
+        _ui.update { it.copy(sessionTokens = 0, modelUsage = emptyList()) }
+    }
+
+    /** Задаёт цену модели (₽ за 1 млн токенов) для оценки суммы расхода. */
+    fun setModelPrice(model: String, rubPerMillion: Double) {
+        _ui.update { it.copy(modelPrices = usageRepo.setPrice(model, rubPerMillion)) }
     }
 
     private fun buildProvider(id: ProviderId, key: String): LlmProvider = when (id) {
@@ -787,7 +798,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val response = provider.send(
             LlmRequest(_ui.value.model, system, listOf(LlmMessage(Role.USER, content = userMsg)), emptyList()),
         )
-        response.usage?.let { recordUsage(it.total) }
+        response.usage?.let { recordUsage(it.prompt, it.completion) }
         return when (response) {
             is LlmResponse.Final -> response.text.trim().lineSequence().firstOrNull()?.take(80)?.ifBlank { null }
             is LlmResponse.ToolUse -> response.text?.trim()?.take(80)?.ifBlank { null }
@@ -851,7 +862,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 apiKey = settings.apiKey(p),
                 testStatus = null,
                 availableModels = emptyList(),
-                totalTokens = usageRepo.total(p),
+                modelUsage = usageRepo.models(p),
             )
         }
     }
