@@ -39,11 +39,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -65,6 +68,19 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 fun MainScreen(vm: MainViewModel) {
     val ui by vm.ui.collectAsState()
     var tab by rememberSaveable { mutableStateOf(Tab.Devices) }
+    // Стек посещённых вкладок: «назад» возвращает на предыдущую, а не на стартовую.
+    val backStack = rememberSaveable(
+        saver = listSaver(
+            save = { it.map(Tab::name) },
+            restore = { it.map(Tab::valueOf).toMutableStateList() },
+        ),
+    ) { mutableStateListOf<Tab>() }
+    val goToTab: (Tab) -> Unit = { target ->
+        if (target != tab) {
+            backStack.add(tab)
+            tab = target
+        }
+    }
     // Держит per-вкладку сохраняемое состояние: черновики форм, стек навигации
     // Гаража и прокрутка не сбрасываются при переключении вкладок.
     val tabStateHolder = rememberSaveableStateHolder()
@@ -101,7 +117,7 @@ fun MainScreen(vm: MainViewModel) {
                 Tab.entries.forEach { t ->
                     NavigationBarItem(
                         selected = tab == t,
-                        onClick = { tab = t },
+                        onClick = { goToTab(t) },
                         icon = { Icon(t.icon, null) },
                         label = { Text(t.label) },
                     )
@@ -109,11 +125,13 @@ fun MainScreen(vm: MainViewModel) {
             }
         },
     ) { padding ->
-        // «Назад» с любой вкладки, кроме «Приборы», возвращает на «Приборы», а не
-        // закрывает приложение. Внутренняя навигация экранов (например, Гараж)
-        // перехватывает «назад» раньше — её BackHandler объявлен ниже по дереву
-        // и потому имеет приоритет над этим.
-        BackHandler(enabled = tab != Tab.Devices) { tab = Tab.Devices }
+        // «Назад» возвращает на предыдущую посещённую вкладку (стек), а не сразу на
+        // стартовую и не закрывает приложение. Внутренняя навигация экранов
+        // (например, Гараж) перехватывает «назад» раньше — её BackHandler объявлен
+        // ниже по дереву и потому имеет приоритет над этим.
+        BackHandler(enabled = backStack.isNotEmpty()) {
+            tab = backStack.removeAt(backStack.lastIndex)
+        }
         // consumeWindowInsets сообщает вложенным элементам, что нижний отступ (навбар)
         // уже применён Scaffold — тогда imePadding у панели ввода не удваивает его.
         Box(
@@ -126,11 +144,10 @@ fun MainScreen(vm: MainViewModel) {
                 when (tab) {
                     Tab.Devices -> DevicesTab(
                         ui = ui,
-                        onScan = { launcher.launch(permissions); vm.refreshDevices(); vm.startScan() },
-                        onStopScan = vm::stopScan,
                         onConnect = vm::connect,
                         onDisconnect = vm::disconnect,
                         onRequestNorm = vm::requestNorm,
+                        onOpenConnection = { goToTab(Tab.Settings) },
                     )
                     Tab.Chat -> ChatTab(
                         ui,
@@ -141,7 +158,12 @@ fun MainScreen(vm: MainViewModel) {
                         onRestore = vm::restoreSession,
                     )
                     Tab.Garage -> GarageTab(ui, vm)
-                    Tab.Settings -> SettingsTab(ui, vm)
+                    Tab.Settings -> SettingsTab(
+                        ui = ui,
+                        vm = vm,
+                        onScan = { launcher.launch(permissions); vm.refreshDevices(); vm.startScan() },
+                        onStopScan = vm::stopScan,
+                    )
                 }
             }
         }

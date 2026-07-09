@@ -47,11 +47,13 @@ import ru.ngscanner.obd.ObdPid
 import ru.ngscanner.service.ObdForegroundService
 import ru.ngscanner.settings.AppSettings
 import ru.ngscanner.settings.ChatRepository
+import ru.ngscanner.settings.FavoritesRepository
 import ru.ngscanner.settings.SessionSummary
 import ru.ngscanner.transport.ClassicSppTransport
 
 enum class ConnectionState { Disconnected, Connecting, Connected }
 
+@kotlinx.serialization.Serializable
 data class DeviceUi(val name: String, val address: String)
 
 @kotlinx.serialization.Serializable
@@ -70,6 +72,7 @@ data class UiState(
     val btEnabled: Boolean = false,
     val devices: List<DeviceUi> = emptyList(),
     val discovered: List<DeviceUi> = emptyList(),
+    val favorites: List<DeviceUi> = emptyList(),
     val scanning: Boolean = false,
     val connection: ConnectionState = ConnectionState.Disconnected,
     val connectedName: String? = null,
@@ -105,6 +108,21 @@ data class UiState(
     val clearDtcsPending: Boolean = false,
 )
 
+/** Данные, подгружаемые с диска при старте (в фоне) и вливаемые в [UiState]. */
+private class LoadedState(
+    val provider: ProviderId,
+    val model: String,
+    val hasKey: Boolean,
+    val apiKey: String,
+    val garage: Garage,
+    val modelNorms: Map<String, String>,
+    val chat: List<ChatMessage>,
+    val sessions: List<SessionSummary>,
+    val keysEncrypted: Boolean,
+    val favorites: List<DeviceUi>,
+    val history: List<LlmMessage>,
+)
+
 /**
  * Состояние экрана: подключение к адаптеру, периодический опрос параметров и
  * чат-диагностика через выбранный LLM-провайдер. Не зависит от Compose.
@@ -116,6 +134,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val garageRepo = GarageRepository(app)
     private val normsRepo = ModelNormsRepository(app)
     private val chatRepo = ChatRepository(app)
+    private val favoritesRepo = FavoritesRepository(app)
 
     private var transport: ClassicSppTransport? = null
     private var elm: Elm327? = null
@@ -126,24 +145,52 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var supportedPids: Set<String> = emptySet()
     private var lastAddress: String? = null
     private var reconnecting = false
-    private var llmHistory: List<LlmMessage> = chatRepo.loadHistory()
+    private var llmHistory: List<LlmMessage> = emptyList()
 
-    private val _ui = MutableStateFlow(
-        garageRepo.load().let { garage ->
-            UiState(
-                provider = settings.provider,
-                model = settings.model,
-                hasKey = settings.apiKey(settings.provider).isNotBlank(),
-                apiKey = settings.apiKey(settings.provider),
-                garage = garage,
-                modelNorms = garage.activeCar?.let { c -> normsRepo.normsFor(c.id) } ?: emptyMap(),
-                chat = chatRepo.loadChat(),
-                sessions = chatRepo.sessions(),
-                keysEncrypted = settings.encrypted,
-            )
-        },
-    )
+    // Стартуем с пустого состояния и подгружаем сохранённые данные (JSON гаража/чата,
+    // расшифровка ключей) в фоне — чтение с диска не должно блокировать главный поток.
+    private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            val loaded = withContext(Dispatchers.IO) {
+                val garage = garageRepo.load()
+                val provider = settings.provider
+                val key = settings.apiKey(provider)
+                LoadedState(
+                    provider = provider,
+                    model = settings.model,
+                    hasKey = key.isNotBlank(),
+                    apiKey = key,
+                    garage = garage,
+                    modelNorms = garage.activeCar?.let { c -> normsRepo.normsFor(c.id) } ?: emptyMap(),
+                    chat = chatRepo.loadChat(),
+                    sessions = chatRepo.sessions(),
+                    keysEncrypted = settings.encrypted,
+                    favorites = favoritesRepo.load(),
+                    history = chatRepo.loadHistory(),
+                )
+            }
+            llmHistory = loaded.history
+            // Мержим в текущее состояние, не затирая рантайм-поля (Bluetooth, соединение),
+            // которые мог успеть выставить refreshDevices() за время загрузки.
+            _ui.update {
+                it.copy(
+                    provider = loaded.provider,
+                    model = loaded.model,
+                    hasKey = loaded.hasKey,
+                    apiKey = loaded.apiKey,
+                    garage = loaded.garage,
+                    modelNorms = loaded.modelNorms,
+                    chat = loaded.chat,
+                    sessions = loaded.sessions,
+                    keysEncrypted = loaded.keysEncrypted,
+                    favorites = loaded.favorites,
+                )
+            }
+        }
+    }
 
     // ---- Подключение к адаптеру ----
 
@@ -182,6 +229,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun stopScan() {
         controller.cancelDiscovery()
         _ui.update { it.copy(scanning = false) }
+    }
+
+    /** Добавляет/убирает адаптер из избранного (быстрое подключение на «Приборах»). */
+    fun toggleFavorite(device: DeviceUi) {
+        _ui.update { it.copy(favorites = favoritesRepo.toggle(device)) }
     }
 
     @SuppressLint("MissingPermission")

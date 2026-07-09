@@ -39,6 +39,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,13 +52,21 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import ru.ngscanner.llm.LlmModel
 import ru.ngscanner.llm.ProviderId
+import ru.ngscanner.ui.ConnectionState
 import ru.ngscanner.ui.UiState
 import ru.ngscanner.ui.MainViewModel
 import ru.ngscanner.ui.TestStatus
 
 @Composable
-internal fun SettingsTab(ui: UiState, vm: MainViewModel) {
+internal fun SettingsTab(
+    ui: UiState,
+    vm: MainViewModel,
+    onScan: () -> Unit,
+    onStopScan: () -> Unit,
+) {
     var keyText by remember(ui.provider, ui.apiKey) { mutableStateOf(ui.apiKey) }
+    // Обновляем список сопряжённых устройств и состояние Bluetooth при открытии.
+    LaunchedEffect(Unit) { vm.refreshDevices() }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -65,6 +74,26 @@ internal fun SettingsTab(ui: UiState, vm: MainViewModel) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        val connectionSummary = when (ui.connection) {
+            ConnectionState.Connected -> "Подключено" + (ui.connectedName?.let { " · $it" } ?: "")
+            ConnectionState.Connecting -> "Подключение…"
+            ConnectionState.Disconnected -> "Не подключено · избранных: ${ui.favorites.size}"
+        }
+        CollapsibleCard(
+            title = "Подключение (Bluetooth)",
+            summary = connectionSummary,
+            initiallyExpanded = ui.connection != ConnectionState.Connected,
+        ) {
+            BluetoothPanel(
+                ui = ui,
+                onScan = onScan,
+                onStopScan = onStopScan,
+                onConnect = vm::connect,
+                onDisconnect = vm::disconnect,
+                onToggleFavorite = vm::toggleFavorite,
+            )
+        }
+
         val providerLabel = if (ui.provider == ProviderId.CLAUDE) "Anthropic Claude" else "Cloud.ru"
         val keyStatus = if (ui.hasKey) "ключ сохранён" else "ключ не задан"
         // Блок провайдера сворачиваем: когда всё настроено — не занимает экран;
