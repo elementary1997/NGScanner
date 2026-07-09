@@ -42,6 +42,7 @@ import ru.ngscanner.llm.LlmException
 import ru.ngscanner.obd.DtcDatabase
 import ru.ngscanner.obd.Elm327
 import ru.ngscanner.obd.ObdPid
+import ru.ngscanner.service.ObdForegroundService
 import ru.ngscanner.settings.AppSettings
 import ru.ngscanner.settings.ChatRepository
 import ru.ngscanner.transport.ClassicSppTransport
@@ -113,6 +114,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var diagnoseJob: Job? = null
     private var clearConfirm: CompletableDeferred<Boolean>? = null
     private var supportedPids: Set<String> = emptySet()
+    private var lastAddress: String? = null
+    private var reconnecting = false
     private var llmHistory: List<LlmMessage> = chatRepo.loadHistory()
 
     private val _ui = MutableStateFlow(
@@ -183,6 +186,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 supportedPids = runCatching { e.readSupportedPids() }.getOrDefault(emptySet())
                 transport = t
                 elm = e
+                lastAddress = address
+                ObdForegroundService.start(getApplication(), device.name)
                 _ui.update {
                     it.copy(connection = ConnectionState.Connected, connectedName = device.name ?: address)
                 }
@@ -218,6 +223,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     emptyStreak++
                 }
+                // Обрыв связи с адаптером — уходим в авто-переподключение.
+                if (transport?.isConnected == false) {
+                    attemptReconnect()
+                    break
+                }
                 // Защита АКБ: ЭБУ давно не отвечает (зажигание выкл / забытый адаптер) — отключаемся.
                 if (System.currentTimeMillis() - lastDataAt > BATTERY_GUARD_MS) {
                     autoDisconnectForBattery()
@@ -245,12 +255,68 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun disconnect() {
+        reconnecting = false
+        lastAddress = null
         stopPolling()
         transport?.close()
         transport = null
         elm = null
+        ObdForegroundService.stop(getApplication())
         _ui.update {
             it.copy(connection = ConnectionState.Disconnected, connectedName = null, metrics = emptyMap())
+        }
+    }
+
+    /** Пытается восстановить связь после обрыва с экспоненциальным бэкоффом. */
+    @SuppressLint("MissingPermission")
+    private fun attemptReconnect() {
+        val address = lastAddress ?: return
+        if (reconnecting) return
+        reconnecting = true
+        _ui.update { it.copy(connection = ConnectionState.Connecting, error = null) }
+        viewModelScope.launch {
+            var delayMs = RECONNECT_BASE_MS
+            repeat(RECONNECT_ATTEMPTS) {
+                delay(delayMs)
+                if (!reconnecting) return@launch
+                val device = controller.deviceByAddress(address)
+                val ok = device != null && runCatching {
+                    transport?.close()
+                    val t = ClassicSppTransport(device)
+                    t.connect()
+                    val e = Elm327(t)
+                    e.initialize()
+                    supportedPids = runCatching { e.readSupportedPids() }.getOrDefault(emptySet())
+                    transport = t
+                    elm = e
+                    true
+                }.getOrDefault(false)
+                if (ok) {
+                    reconnecting = false
+                    _ui.update {
+                        it.copy(
+                            connection = ConnectionState.Connected,
+                            connectedName = device?.name ?: address,
+                            error = null,
+                        )
+                    }
+                    startPolling()
+                    return@launch
+                }
+                delayMs = (delayMs * 2).coerceAtMost(RECONNECT_MAX_MS)
+            }
+            reconnecting = false
+            transport = null
+            elm = null
+            ObdForegroundService.stop(getApplication())
+            _ui.update {
+                it.copy(
+                    connection = ConnectionState.Disconnected,
+                    connectedName = null,
+                    metrics = emptyMap(),
+                    error = "Связь с адаптером потеряна, переподключение не удалось. Проверьте адаптер и подключитесь заново.",
+                )
+            }
         }
     }
 
@@ -619,6 +685,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         stopPolling()
         controller.cancelDiscovery()
         transport?.close()
+        ObdForegroundService.stop(getApplication())
     }
 
     companion object {
@@ -626,5 +693,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private const val POLL_IDLE_MS = 5000L
         private const val IDLE_THRESHOLD = 4
         private const val BATTERY_GUARD_MS = 5 * 60 * 1000L
+        private const val RECONNECT_ATTEMPTS = 5
+        private const val RECONNECT_BASE_MS = 2000L
+        private const val RECONNECT_MAX_MS = 16000L
     }
 }

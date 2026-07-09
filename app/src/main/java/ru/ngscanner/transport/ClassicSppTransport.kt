@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothSocket
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
@@ -59,8 +60,13 @@ class ClassicSppTransport(
     override suspend fun write(command: String) {
         withContext(Dispatchers.IO) {
             val out = output ?: throw ObdTransportException("Нет активного соединения")
-            out.write((command + "\r").toByteArray())
-            out.flush()
+            try {
+                out.write((command + "\r").toByteArray())
+                out.flush()
+            } catch (e: IOException) {
+                isConnected = false
+                throw ObdTransportException("Связь с адаптером потеряна", e)
+            }
         }
     }
 
@@ -68,16 +74,21 @@ class ClassicSppTransport(
         val inp = input ?: throw ObdTransportException("Нет активного соединения")
         val sb = StringBuilder()
         val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
-            if (inp.available() > 0) {
-                val c = inp.read()
-                if (c == -1) break
-                val ch = c.toChar()
-                if (ch == '>') break // приглашение ELM327 — конец ответа
-                sb.append(ch)
-            } else {
-                delay(20)
+        try {
+            while (System.currentTimeMillis() < deadline) {
+                if (inp.available() > 0) {
+                    val c = inp.read()
+                    if (c == -1) break
+                    val ch = c.toChar()
+                    if (ch == '>') break // приглашение ELM327 — конец ответа
+                    sb.append(ch)
+                } else {
+                    delay(20)
+                }
             }
+        } catch (e: IOException) {
+            isConnected = false
+            throw ObdTransportException("Связь с адаптером потеряна", e)
         }
         sb.toString().trim()
     }
