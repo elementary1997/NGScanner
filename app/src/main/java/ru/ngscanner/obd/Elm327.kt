@@ -52,6 +52,34 @@ class Elm327(private val transport: ObdTransport) {
         else -> 0
     }
 
+    /** Человекочитаемое имя протокола ELM327 по номеру; `null`, если ещё не определён. */
+    suspend fun protocolName(): String? = when (protocolNumber()) {
+        1 -> "SAE J1850 PWM"
+        2 -> "SAE J1850 VPW"
+        3 -> "ISO 9141-2"
+        4 -> "ISO 14230 KWP (5 baud)"
+        5 -> "ISO 14230 KWP (fast)"
+        6 -> "CAN 11-bit, 500 кбит"
+        7 -> "CAN 29-bit, 500 кбит"
+        8 -> "CAN 11-bit, 250 кбит"
+        9 -> "CAN 29-bit, 250 кбит"
+        else -> null
+    }
+
+    /**
+     * Перезапускает автоопределение протокола (`ATSP0`) и триггерит автопоиск пробным
+     * запросом. Нужно, когда ELM327-клон «залип» на неудачном автопоиске и упорно
+     * отдаёт NO DATA, хотя ЭБУ на связи. Сбрасывает кэш номера протокола.
+     */
+    suspend fun resetProtocol() = mutex.withLock {
+        protocolNum = null
+        transport.write("ATSP0")
+        transport.readResponse()
+        delay(60)
+        transport.write("0100") // любой OBD-запрос запускает автопоиск заново
+        transport.readResponse()
+    }
+
     /** Последовательность инициализации адаптера перед работой. */
     suspend fun initialize() = mutex.withLock {
         protocolNum = null

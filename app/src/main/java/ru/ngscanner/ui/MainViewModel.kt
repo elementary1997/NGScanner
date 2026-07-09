@@ -105,6 +105,8 @@ data class UiState(
     val supportedPids: Set<String> = emptySet(),
     // отвечает ли ЭБУ на запросы (данные идут) — отдельно от статуса адаптера
     val ecuResponding: Boolean = false,
+    // определённый протокол связи (CAN 500k / ISO 14230 KWP…); null — ещё не определён
+    val ecuProtocol: String? = null,
     // история значений с временными метками для графиков (последние точки на параметр)
     val history: Map<ObdPid, List<MetricSample>> = emptyMap(),
     // чтение кодов неисправностей (Mode 03/07/0A) для экрана «Коды»
@@ -359,6 +361,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         // Пусто = определить не удалось, тогда дашборд покажет все.
                         supportedPids = if (supportedPids.isEmpty()) emptySet() else supportedPids + ObdPid.VOLTAGE.cmd,
                         ecuResponding = false,
+                        ecuProtocol = null,
                     )
                 }
                 startTripRecording()
@@ -384,33 +387,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             var lastDataAt = System.currentTimeMillis()
             while (isActive) {
                 val e = elm ?: break
-                val values = LinkedHashMap<ObdPid, Double>()
+                // Данные ОТ ЭБУ (реальные OBD-ответы) — по ним судим, отвечает ли ЭБУ.
+                val ecuValues = LinkedHashMap<ObdPid, Double>()
                 for (pid in pids) {
-                    val v = runCatching { e.read(pid) }.getOrNull()
-                    if (v != null) values[pid] = v
+                    runCatching { e.read(pid) }.getOrNull()?.let { ecuValues[pid] = it }
                 }
-                // Напряжение берём командой адаптера ATRV — надёжнее Mode 01 PID 42,
-                // который многие ЭБУ (в т.ч. на Ниве) не поддерживают.
-                runCatching { e.readAdapterVoltage() }.getOrNull()?.let { values[ObdPid.VOLTAGE] = it }
-                if (values.isNotEmpty()) {
-                    val now = System.currentTimeMillis()
+                // Напряжение — командой адаптера ATRV; работает и БЕЗ ЭБУ, поэтому в
+                // признак «ЭБУ отвечает» не входит, но на дашборд/в историю попадает.
+                val merged = LinkedHashMap(ecuValues)
+                runCatching { e.readAdapterVoltage() }.getOrNull()?.let { merged[ObdPid.VOLTAGE] = it }
+                val now = System.currentTimeMillis()
+                if (merged.isNotEmpty()) {
                     _ui.update { state ->
                         val history = state.history.toMutableMap()
-                        values.forEach { (pid, v) ->
+                        merged.forEach { (pid, v) ->
                             history[pid] = ((history[pid] ?: emptyList()) + MetricSample(now, v)).takeLast(HISTORY_SIZE)
                         }
                         // Мержим, а не заменяем: промах одного PID (норма для ELM327)
                         // не должен гасить остальные приборы в «—» до следующего цикла.
-                        state.copy(metrics = state.metrics + values, history = history, ecuResponding = true)
+                        state.copy(metrics = state.metrics + merged, history = history)
                     }
-                    recordTripSample(now, values)
-                    checkBlackBox(now, values)
+                    recordTripSample(now, merged)
+                    checkBlackBox(now, merged)
+                }
+                if (ecuValues.isNotEmpty()) {
+                    // ЭБУ на связи: статус + определяем протокол один раз, когда заговорил.
+                    val proto = if (_ui.value.ecuProtocol == null) runCatching { e.protocolName() }.getOrNull() else null
+                    _ui.update { it.copy(ecuResponding = true, ecuProtocol = it.ecuProtocol ?: proto) }
                     emptyStreak = 0
                     lastDataAt = now
                 } else {
                     emptyStreak++
                     // Несколько пустых циклов подряд — ЭБУ молчит (зажигание выкл / шина).
                     if (emptyStreak >= 2 && _ui.value.ecuResponding) _ui.update { it.copy(ecuResponding = false) }
+                    // Один раз пробуем перезапустить автоопределение протокола: ELM-клон
+                    // мог «залипнуть» на неудачном автопоиске и упорно отдавать NO DATA.
+                    if (emptyStreak == PROTOCOL_RETRY_STREAK && transport?.isConnected == true) {
+                        runCatching { e.resetProtocol() }
+                    }
                 }
                 // Обрыв связи с адаптером — уходим в авто-переподключение.
                 if (transport?.isConnected == false) {
@@ -576,6 +590,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 history = emptyMap(),
                 supportedPids = emptySet(),
                 ecuResponding = false,
+                ecuProtocol = null,
             )
         }
     }
@@ -672,7 +687,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         stopPolling()
         diagnoseJob = viewModelScope.launch {
             try {
-                llmHistory = trimLlmHistory(agent.run(text, images, llmHistory, carContext(), adapterConnected = elm != null) { event ->
+                llmHistory = trimLlmHistory(agent.run(text, images, llmHistory, carContext(), adapterConnected = elm != null, connectionInfo = connectionInfo()) { event ->
                     when (event) {
                         // Ответ модели остаётся в истории; сбрасываем статус — дальше она «думает».
                         is AgentEvent.Assistant -> {
@@ -984,6 +999,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Контекст активной машины для агента: паспорт + последние записи бортжурнала. */
+    /**
+     * Состояние связи для промпта агента: протокол и отвечает ли ЭБУ. Заземляет
+     * модель — чтобы при NO DATA она не советовала «переключить на CAN» (автовыбор
+     * уже включён), а сначала проверила зажигание.
+     */
+    private fun connectionInfo(): String? {
+        if (elm == null) return null
+        val proto = _ui.value.ecuProtocol?.let { "протокол $it" } ?: "протокол ещё определяется"
+        return if (_ui.value.ecuResponding) {
+            "Связь с автомобилем: адаптер подключён, $proto, ЭБУ отвечает — живые данные читаются."
+        } else {
+            "Связь с автомобилем: адаптер подключён ($proto), но ЭБУ СЕЙЧАС не отвечает на OBD-запросы " +
+                "(данные и коды не читаются, NO DATA). ВАЖНО: автоопределение протокола включено (ATSP0), " +
+                "протокол менять НЕ нужно и советовать это НЕ надо. Самая вероятная причина — зажигание не в " +
+                "положении ON или двигатель заглушён; попроси пользователя включить зажигание/завести мотор и " +
+                "повторить, прежде чем делать любые выводы о неисправностях."
+        }
+    }
+
     private fun carContext(): String? {
         val car = _ui.value.garage.activeCar ?: return null
         return buildString {
@@ -1282,6 +1316,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private const val POLL_INTERVAL_MS = 1500L
         private const val POLL_IDLE_MS = 5000L
         private const val IDLE_THRESHOLD = 4
+        private const val PROTOCOL_RETRY_STREAK = 4 // пустых циклов до попытки перезапуска протокола
         private const val BATTERY_GUARD_MS = 5 * 60 * 1000L
         private const val RECONNECT_ATTEMPTS = 5
         private const val RECONNECT_BASE_MS = 2000L

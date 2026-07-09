@@ -186,7 +186,7 @@ private fun DevicesConnected(
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize()) {
         Spacer(Modifier.height(8.dp))
-        Column(Modifier.padding(horizontal = 16.dp)) { StatusCard(ui.connection, ui.connectedName, ui.ecuResponding) }
+        Column(Modifier.padding(horizontal = 16.dp)) { StatusCard(ui.connection, ui.connectedName, ui.ecuResponding, ui.ecuProtocol) }
         Spacer(Modifier.height(12.dp))
         PanelTabs(pagerState.currentPage) { page -> scope.launch { pagerState.animateScrollToPage(page) } }
         Spacer(Modifier.height(4.dp))
@@ -257,7 +257,7 @@ private fun PanelTabs(current: Int, onSelect: (Int) -> Unit) {
 }
 
 @Composable
-internal fun StatusCard(state: ConnectionState, name: String?, ecuResponding: Boolean = false) {
+internal fun StatusCard(state: ConnectionState, name: String?, ecuResponding: Boolean = false, ecuProtocol: String? = null) {
     val cs = MaterialTheme.colorScheme
     val icon: ImageVector
     val text: String
@@ -299,7 +299,11 @@ internal fun StatusCard(state: ConnectionState, name: String?, ecuResponding: Bo
                     Box(Modifier.size(9.dp).clip(CircleShape).background(ecuColor))
                     Spacer(Modifier.width(11.dp))
                     Text(
-                        if (ecuResponding) "ЭБУ: отвечает, данные идут" else "ЭБУ: нет ответа — включите зажигание",
+                        when {
+                            ecuResponding && ecuProtocol != null -> "ЭБУ: отвечает · $ecuProtocol"
+                            ecuResponding -> "ЭБУ: отвечает, данные идут"
+                            else -> "ЭБУ: нет ответа — включите зажигание"
+                        },
                         color = fg,
                         style = MaterialTheme.typography.bodyMedium,
                     )

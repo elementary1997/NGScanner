@@ -26,16 +26,19 @@ class DiagnosticAgent(
         history: List<LlmMessage>,
         carContext: String? = null,
         adapterConnected: Boolean = true,
+        connectionInfo: String? = null,
         onEvent: (AgentEvent) -> Unit,
     ): List<LlmMessage> {
         val messages = history.toMutableList()
         messages.add(LlmMessage(Role.USER, content = userMessage, images = images))
         // Системный промпт зависит от того, подключён ли адаптер: без него агент
-        // отвечает на общие вопросы и не упирается в OBD-инструменты.
+        // отвечает на общие вопросы и не упирается в OBD-инструменты. Инфо о связи
+        // (протокол, отвечает ли ЭБУ) заземляет агента, чтобы он не выдумывал причины.
         val system = buildString {
             append(SYSTEM_PROMPT)
             append("\n\n")
             append(if (adapterConnected) ADAPTER_ONLINE_NOTE else ADAPTER_OFFLINE_NOTE)
+            if (!connectionInfo.isNullOrBlank()) append("\n\n").append(connectionInfo)
             if (!carContext.isNullOrBlank()) append("\n\n").append(carContext)
         }
 
