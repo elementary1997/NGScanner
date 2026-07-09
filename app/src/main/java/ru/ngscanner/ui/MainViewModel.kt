@@ -1238,7 +1238,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Человекочитаемый статус вместо технического имени инструмента. */
     private fun toolStatusText(tool: String): String = when (tool) {
+        "full_scan" -> "Собираю полный снимок автомобиля…"
         "read_dtcs" -> "Читаю коды неисправностей…"
+        "read_permanent_dtcs" -> "Проверяю постоянные коды…"
+        "read_readiness" -> "Проверяю готовность мониторов…"
         "read_pending_dtcs" -> "Проверяю неподтверждённые коды…"
         "read_freeze_frame" -> "Смотрю freeze frame…"
         "read_live_data" -> "Считываю параметры двигателя…"

@@ -62,6 +62,7 @@ class ObdToolExecutor(
     }
 
     private suspend fun runTool(elm: Elm327, call: ToolCall): String = when (call.name) {
+        "full_scan" -> fullScan(elm)
         "get_connection_status" ->
             "Соединение активно. Протокол: ${elm.command("ATDP").ifBlank { "неизвестен" }}"
         "read_vehicle_info" -> {
@@ -124,6 +125,40 @@ class ObdToolExecutor(
             sb.append(name).append(": ").append(readNamedPid(elm, name) ?: "нет данных").append('\n')
         }
         return sb.toString().trimEnd()
+    }
+
+    /**
+     * Полный диагностический снимок одним вызовом: коды всех типов, готовность,
+     * freeze frame и ключевые живые параметры. Даёт агенту весь контекст сразу,
+     * чтобы он рассуждал по связке данных, а не по одному коду.
+     */
+    private suspend fun fullScan(elm: Elm327): String {
+        val isCan = elm.isCan()
+        val hl = elm.headerHexLen()
+        return buildString {
+            append(formatDtcs("Активные коды", elm.command("03"), isCan, hl, "43")).append("\n\n")
+            val pending = formatDtcs("Неподтверждённые коды", elm.command("07"), isCan, hl, "47")
+            if (!pending.contains("не обнаружены")) append(pending).append("\n\n")
+            val permanent = formatDtcs("Постоянные коды", elm.command("0A"), isCan, hl, "4A")
+            if (!permanent.contains("не обнаружены")) append(permanent).append("\n\n")
+            append(readReadiness(elm)).append("\n\n")
+            append(readFreezeFrame(elm)).append("\n\n")
+            append("Ключевые живые параметры:\n").append(keyLiveData(elm))
+        }
+    }
+
+    /** Ключевые для диагностики параметры разом; напряжение — через ATRV адаптера. */
+    private suspend fun keyLiveData(elm: Elm327): String {
+        val pids = listOf(
+            ObdPid.RPM, ObdPid.COOLANT, ObdPid.ENGINE_LOAD, ObdPid.THROTTLE,
+            ObdPid.MAF, ObdPid.MAP, ObdPid.STFT, ObdPid.LTFT, ObdPid.O2_LAMBDA, ObdPid.INTAKE_TEMP,
+        )
+        val sb = StringBuilder()
+        for (p in pids) {
+            runCatching { elm.read(p) }.getOrNull()?.let { sb.append("• ${p.label}: ${formatValue(it)} ${p.unit}\n") }
+        }
+        runCatching { elm.readAdapterVoltage() }.getOrNull()?.let { sb.append("• Напряжение бортсети: ${formatValue(it)} В\n") }
+        return sb.toString().ifBlank { "нет данных — ЭБУ не отвечает или зажигание выключено" }.trimEnd()
     }
 
     /** Готовность бортовых мониторов (Mode 01 PID 01) — статус MIL и самотестов систем. */
