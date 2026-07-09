@@ -14,6 +14,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -98,7 +99,27 @@ class ClaudeProvider(
             Role.USER -> add(
                 buildJsonObject {
                     put("role", "user")
-                    put("content", m.content ?: "")
+                    if (m.images.isEmpty()) {
+                        put("content", m.content ?: "")
+                    } else {
+                        putJsonArray("content") {
+                            m.images.forEach { img ->
+                                add(
+                                    buildJsonObject {
+                                        put("type", "image")
+                                        putJsonObject("source") {
+                                            put("type", "base64")
+                                            put("media_type", img.mediaType)
+                                            put("data", img.base64)
+                                        }
+                                    },
+                                )
+                            }
+                            if (!m.content.isNullOrBlank()) {
+                                add(buildJsonObject { put("type", "text"); put("text", m.content) })
+                            }
+                        }
+                    }
                 },
             )
             Role.ASSISTANT -> add(

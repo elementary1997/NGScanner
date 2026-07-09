@@ -1,5 +1,6 @@
 package ru.ngscanner.agent
 
+import ru.ngscanner.llm.LlmImage
 import ru.ngscanner.llm.LlmMessage
 import ru.ngscanner.llm.LlmProvider
 import ru.ngscanner.llm.LlmRequest
@@ -21,11 +22,12 @@ class DiagnosticAgent(
 ) {
     suspend fun run(
         userMessage: String,
+        images: List<LlmImage>,
         history: List<LlmMessage>,
         onEvent: (AgentEvent) -> Unit,
     ): List<LlmMessage> {
         val messages = history.toMutableList()
-        messages.add(LlmMessage(Role.USER, content = userMessage))
+        messages.add(LlmMessage(Role.USER, content = userMessage, images = images))
 
         var steps = 0
         while (steps++ < MAX_STEPS) {

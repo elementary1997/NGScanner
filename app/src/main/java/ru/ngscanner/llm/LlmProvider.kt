@@ -44,9 +44,13 @@ data class LlmRequest(
 data class LlmMessage(
     val role: Role,
     val content: String? = null,
+    val images: List<LlmImage> = emptyList(),
     val toolCalls: List<ToolCall> = emptyList(),
     val toolResults: List<ToolResult> = emptyList(),
 )
+
+/** Изображение для vision-моделей: base64 без префикса `data:` + MIME-тип. */
+data class LlmImage(val base64: String, val mediaType: String = "image/jpeg")
 
 enum class Role { USER, ASSISTANT, TOOL }
 

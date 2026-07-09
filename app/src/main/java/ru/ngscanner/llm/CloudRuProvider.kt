@@ -94,7 +94,28 @@ class CloudRuProvider(
     private fun JsonArrayBuilder.addMessage(m: LlmMessage) {
         when (m.role) {
             Role.USER -> add(
-                buildJsonObject { put("role", "user"); put("content", m.content ?: "") },
+                buildJsonObject {
+                    put("role", "user")
+                    if (m.images.isEmpty()) {
+                        put("content", m.content ?: "")
+                    } else {
+                        putJsonArray("content") {
+                            if (!m.content.isNullOrBlank()) {
+                                add(buildJsonObject { put("type", "text"); put("text", m.content) })
+                            }
+                            m.images.forEach { img ->
+                                add(
+                                    buildJsonObject {
+                                        put("type", "image_url")
+                                        putJsonObject("image_url") {
+                                            put("url", "data:${img.mediaType};base64,${img.base64}")
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                },
             )
             Role.ASSISTANT -> add(
                 buildJsonObject {
