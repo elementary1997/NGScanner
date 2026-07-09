@@ -212,23 +212,31 @@ class ObdParserTest {
     @Test
     fun parsesPermanentDtcCan() {
         // 4A 02 0133 0420 → счётчик 02, коды P0133 и P0420 (вектор из сверки формата).
-        val result = ObdParser.parseDtcs("4A 02 01 33 04 20", isCan = true) as DtcResult.Ok
+        val result = ObdParser.parseDtcs("4A 02 01 33 04 20", isCan = true, respHeader = "4A") as DtcResult.Ok
         assertEquals(listOf("P0133", "P0420"), result.codes)
     }
 
     @Test
     fun parsesPermanentDtcAllSystems() {
         // 4A 04 + P/C/B/U с первой цифрой 0: 0133/4133/8133/C133.
-        val result = ObdParser.parseDtcs("4A 04 01 33 41 33 81 33 C1 33", isCan = true) as DtcResult.Ok
+        val result = ObdParser.parseDtcs("4A 04 01 33 41 33 81 33 C1 33", isCan = true, respHeader = "4A") as DtcResult.Ok
         assertEquals(listOf("P0133", "C0133", "B0133", "U0133"), result.codes)
     }
 
     @Test
     fun permanentDtcEmptyIsOkNotNoData() {
         // 4A 00 — ЭБУ ответил, постоянных кодов нет (не путать с NO DATA).
-        val result = ObdParser.parseDtcs("4A 00", isCan = true)
+        val result = ObdParser.parseDtcs("4A 00", isCan = true, respHeader = "4A")
         assertTrue(result is DtcResult.Ok)
         assertTrue((result as DtcResult.Ok).codes.isEmpty())
+    }
+
+    @Test
+    fun parseDtcsMatchesOnlyExpectedHeader() {
+        // Запрос Mode 03 (respHeader 43), а в ответе только 4A — не должен ловить чужой
+        // заголовок и придумывать код: ищем ровно ожидаемый ответ-байт.
+        val result = ObdParser.parseDtcs("4A 01 01 33", isCan = true, respHeader = "43")
+        assertTrue(result is DtcResult.Unknown)
     }
 
     // ---- Readiness: Mode 01 PID 01 (вектор из сверки с python-OBD) ----
@@ -266,6 +274,17 @@ class ObdParserTest {
         assertEquals(1, r.dtcCount)
     }
 
+    @Test
+    fun readinessAggregatesAcrossEcus() {
+        // Два ЭБУ по 7Ex: 7E8 — Catalyst поддержан и ГОТОВ (C=01,D=00);
+        // 7E9 — Catalyst поддержан и НЕ готов (C=01,D=01), плюс 1 код.
+        // Чтение только первого ЭБУ дало бы ложное «готов»; агрегация → НЕ готов.
+        // Дискриминирует и headerHexLen: без группировки взялся бы лишь первый 4101.
+        val r = ObdParser.parseReadiness("7E806410100000100\r7E906410101000101", headerHexLen = 3)!!
+        assertEquals(1, r.dtcCount) // 0 + 1 по обоим ЭБУ
+        assertEquals(false, r.monitors.first { it.name == "Катализатор" }.ready)
+    }
+
     // ---- Calibration ID: Mode 09 PID 04 (векторы из сверки формата) ----
     @Test
     fun parsesSingleCalibrationId() {
@@ -279,5 +298,20 @@ class ObdParserTest {
         // 49 04 02 + два блока по 16 байт: «JMB*36761500» и «JMB*36751200».
         val raw = "49 04 02 4A4D422A3336373631353030 00000000 4A4D422A3336373531323030 00000000"
         assertEquals(listOf("JMB*36761500", "JMB*36751200"), ObdParser.parseCalibrationIds(raw))
+    }
+
+    @Test
+    fun parsesMultiframeCalibrationIdRawFrames() {
+        // Cal ID, собираемый из ISO-TP кадров (CAF off): FF 1013 + два CF.
+        val raw = "1013490401333938\r2130303030304143\r22000000000000"
+        assertEquals(listOf("39800000AC"), ObdParser.parseCalibrationIds(raw))
+    }
+
+    // ---- VIN: усечённый (битый мультифрейм) не отдаём ----
+    @Test
+    fun rejectsTruncatedVin() {
+        // Меньше 17 ASCII символов (битый мультифрейм) — parseVin должен вернуть null.
+        val raw = "4902015741 4A4D4235 34313332"
+        assertNull(ObdParser.parseVin(raw))
     }
 }

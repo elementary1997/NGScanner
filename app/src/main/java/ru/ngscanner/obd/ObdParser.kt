@@ -55,7 +55,7 @@ object ObdParser {
      * нельзя надёжно угадать по самим байтам (легаси-код P01xx неотличим от
      * CAN-счётчика 01), поэтому протокол передаётся снаружи (см. Elm327.isCan).
      */
-    fun parseDtcs(raw: String, isCan: Boolean = true, headerHexLen: Int = 0): DtcResult {
+    fun parseDtcs(raw: String, isCan: Boolean = true, headerHexLen: Int = 0, respHeader: String = "43"): DtcResult {
         val upper = raw.uppercase()
         when {
             "UNABLE TO CONNECT" in upper || "BUS INIT" in upper || "BUSINIT" in upper ||
@@ -71,11 +71,10 @@ object ObdParser {
         val codes = mutableListOf<String>()
         var sawHeader = false
         for (msg in messages) {
-            // Заголовок ответа режима стоит в начале собранного payload: 43 (Mode 03),
-            // 47 (Mode 07) или 4A (Mode 0A). Берём самый ранний — это и есть заголовок.
-            val start = listOf("43", "47", "4A")
-                .mapNotNull { h -> msg.indexOf(h).takeIf { it >= 0 } }
-                .minOrNull() ?: -1
+            // Ищем ИМЕННО ожидаемый заголовок ответа (43 Mode03 / 47 Mode07 / 4A Mode0A),
+            // а не «любой из трёх»: без ATH1 байт 4A/47/43 в данных на чётном смещении мог
+            // бы ложно выиграть и породить фантомный код.
+            val start = msg.indexOf(respHeader)
             if (start < 0) continue
             sawHeader = true
             codes += parseDtcPayload(msg.substring(start + 2), isCan)
@@ -157,7 +156,9 @@ object ObdParser {
             .map { it.toChar() }
             .joinToString("")
         val vin = ascii.filter { it.isLetterOrDigit() }
-        return vin.takeIf { it.length >= 11 }?.take(17)
+        // OBD-II VIN — ровно 17 символов. Усечённый (битый мультифрейм) не отдаём:
+        // иначе он молча ушёл бы в сетевой decode и мог сохраниться как невалидный.
+        return vin.takeIf { it.length >= 17 }?.take(17)
     }
 
     /** Один бортовой монитор готовности: поддерживается ли и завершён ли самотест. */
@@ -187,30 +188,70 @@ object ObdParser {
         null, "Датчик ОГ", "Сажевый фильтр", "EGR/VVT",
     )
 
+    /** Сырой статус монитора одного ЭБУ до агрегации. */
+    private data class RawMonitor(val name: String, val supported: Boolean, val ready: Boolean)
+
     /**
      * Статус готовности мониторов из Mode 01 PID 01 (`41 01 A B C D`).
      * A7 — MIL, A6..A0 — число кодов; B3 — тип зажигания (0 бензин / 1 дизель);
      * непрерывные мониторы в B (supported B0..B2, complete B4..B6, где бит=0 — готов),
-     * разовые — байт C (supported=1) и D (complete: бит=0 — готов). Монитор считаем
-     * присутствующим только при supported; готов = supported и complete-бит равен 0.
+     * разовые — байт C (supported=1) и D (complete: бит=0 — готов).
+     *
+     * На CAN отвечать могут несколько ЭБУ (каждый своим `4101`) — агрегируем по всем:
+     * MIL и «поддерживается» по ИЛИ, число кодов суммируем, а монитор считаем готовым,
+     * только когда его завершили ВСЕ поддерживающие модули (И). Читать первый ЭБУ
+     * опасно — недооценили бы готовность вплоть до ложного «всё готово».
      */
     fun parseReadiness(raw: String, headerHexLen: Int = 0): Readiness? {
-        val data = dataBytes(raw, "0101") ?: return null
-        if (data.size < 4) return null
-        val (a, b, c, d) = listOf(data[0], data[1], data[2], data[3])
-        val monitors = mutableListOf<Monitor>()
-        // Непрерывные (байт B): supported B0..B2, «не готов» B4..B6 (бит=1 → не завершён).
-        for (i in 0..2) {
-            if ((b shr i) and 1 == 1) monitors.add(Monitor(CONTINUOUS[i], ready = (b shr (i + 4)) and 1 == 0))
+        val messages = IsoTp.messages(raw, headerHexLen).filter { it.contains("4101") }
+            .ifEmpty { normalize(raw).takeIf { it.contains("4101") }?.let { listOf(it) } ?: emptyList() }
+        if (messages.isEmpty()) return null
+
+        var milOn = false
+        var dtcCount = 0
+        var compression = false
+        var typeKnown = false
+        // Порядок мониторов сохраняем; supported = ИЛИ, ready = И по поддерживающим ЭБУ.
+        val supported = LinkedHashMap<String, Boolean>()
+        val ready = HashMap<String, Boolean>()
+        for (msg in messages) {
+            val bytes = readinessBytes(msg) ?: continue
+            val (a, b, c, d) = listOf(bytes[0], bytes[1], bytes[2], bytes[3])
+            milOn = milOn || (a and 0x80) != 0
+            dtcCount += a and 0x7F
+            val comp = (b shr 3) and 1 == 1
+            if (!typeKnown) { compression = comp; typeKnown = true }
+            for (m in decodeMonitors(b, c, d, comp)) {
+                supported[m.name] = (supported[m.name] ?: false) || m.supported
+                if (m.supported) ready[m.name] = (ready[m.name] ?: true) && m.ready
+            }
         }
-        // Разовые (байт C supported, байт D готовность). Набор зависит от типа двигателя.
-        val compression = (b shr 3) and 1 == 1
+        if (!typeKnown) return null
+        val monitors = supported.filterValues { it }.keys.map { Monitor(it, ready[it] ?: false) }
+        return Readiness(milOn = milOn, dtcCount = dtcCount, compression = compression, monitors = monitors)
+    }
+
+    /** Байты A,B,C,D из сообщения одного ЭБУ (после заголовка `4101`). */
+    private fun readinessBytes(msg: String): IntArray? {
+        val idx = msg.indexOf("4101")
+        if (idx < 0) return null
+        val after = msg.substring(idx + 4)
+        if (after.length < 8) return null
+        return runCatching { after.take(8).chunked(2).map { it.toInt(16) }.toIntArray() }.getOrNull()
+    }
+
+    /** Мониторы одного ЭБУ: непрерывные (байт B) и разовые (C supported / D готовность). */
+    private fun decodeMonitors(b: Int, c: Int, d: Int, compression: Boolean): List<RawMonitor> {
+        val list = ArrayList<RawMonitor>(11)
+        for (i in 0..2) {
+            list.add(RawMonitor(CONTINUOUS[i], supported = (b shr i) and 1 == 1, ready = (b shr (i + 4)) and 1 == 0))
+        }
         val names = if (compression) COMPRESSION_MONITORS else SPARK_MONITORS
         for (i in 0..7) {
             val name = names[i] ?: continue
-            if ((c shr i) and 1 == 1) monitors.add(Monitor(name, ready = (d shr i) and 1 == 0))
+            list.add(RawMonitor(name, supported = (c shr i) and 1 == 1, ready = (d shr i) and 1 == 0))
         }
-        return Readiness(milOn = (a and 0x80) != 0, dtcCount = a and 0x7F, compression = compression, monitors = monitors)
+        return list
     }
 
     /**
