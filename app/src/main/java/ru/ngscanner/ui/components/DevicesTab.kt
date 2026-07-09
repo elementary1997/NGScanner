@@ -1,7 +1,9 @@
 package ru.ngscanner.ui.components
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,10 +16,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
 import ru.ngscanner.obd.ObdPid
 import ru.ngscanner.trips.Trip
+import ru.ngscanner.ui.theme.StatusGood
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.BluetoothSearching
 import androidx.compose.material.icons.rounded.Bluetooth
@@ -68,6 +73,9 @@ internal fun DevicesTab(
     onDeleteTrip: (String) -> Unit,
     onExportTrip: (String) -> Unit,
     loadTrip: suspend (String) -> Trip?,
+    onReadDtc: () -> Unit,
+    onClearDtc: () -> Unit,
+    onExplainDtc: (ru.ngscanner.ui.DtcItem) -> Unit,
 ) {
     // Имя открытого параметра (String сохраняется в Bundle → график переживает поворот).
     var graphName by rememberSaveable { mutableStateOf<String?>(null) }
@@ -75,6 +83,8 @@ internal fun DevicesTab(
     var graphOverlays by remember { mutableStateOf<Set<String>>(emptySet()) }
     // Открыт ли экран записей (доступен и без соединения — просмотр сохранённого).
     var showTrips by rememberSaveable { mutableStateOf(false) }
+    // Открыт ли экран кодов неисправностей.
+    var showDtc by rememberSaveable { mutableStateOf(false) }
     // При обрыве связи закрываем график, иначе при авто-реконнекте early-return
     // прыгнул бы сразу в него, минуя дашборд.
     LaunchedEffect(ui.connection) {
@@ -110,6 +120,18 @@ internal fun DevicesTab(
         )
         return
     }
+    // Экран кодов неисправностей — читает коды при открытии.
+    if (showDtc && ui.connection == ConnectionState.Connected) {
+        LaunchedEffect(Unit) { onReadDtc() }
+        DtcScreen(
+            ui = ui,
+            onBack = { showDtc = false },
+            onRefresh = onReadDtc,
+            onClear = onClearDtc,
+            onExplain = { item -> showDtc = false; onExplainDtc(item) },
+        )
+        return
+    }
     // При активном соединении — приборы и графики на двух свайпаемых панелях; иначе
     // (нет данных для графиков) прежний одиночный экран со статусом и избранными.
     if (ui.connection == ConnectionState.Connected) {
@@ -123,6 +145,7 @@ internal fun DevicesTab(
             },
             onSetGraphPids = onSetGraphPids,
             onOpenTrips = { showTrips = true },
+            onOpenDtc = { showDtc = true },
         )
     } else {
         Column(
@@ -157,12 +180,13 @@ private fun DevicesConnected(
     onOpenCombo: (List<ObdPid>) -> Unit,
     onSetGraphPids: (List<String>) -> Unit,
     onOpenTrips: () -> Unit,
+    onOpenDtc: () -> Unit,
 ) {
     val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize()) {
         Spacer(Modifier.height(8.dp))
-        Column(Modifier.padding(horizontal = 16.dp)) { StatusCard(ui.connection, ui.connectedName) }
+        Column(Modifier.padding(horizontal = 16.dp)) { StatusCard(ui.connection, ui.connectedName, ui.ecuResponding) }
         Spacer(Modifier.height(12.dp))
         PanelTabs(pagerState.currentPage) { page -> scope.launch { pagerState.animateScrollToPage(page) } }
         Spacer(Modifier.height(4.dp))
@@ -176,7 +200,7 @@ private fun DevicesConnected(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     Spacer(Modifier.height(4.dp))
-                    Dashboard(ui.metrics, ui.history, onDisconnect, onOpenGraph)
+                    Dashboard(ui.metrics, ui.history, ui.supportedPids, onDisconnect, onOpenGraph, onOpenDtc)
                     ui.error?.let { ErrorCard(it) }
                     Spacer(Modifier.height(16.dp))
                 }
@@ -233,7 +257,7 @@ private fun PanelTabs(current: Int, onSelect: (Int) -> Unit) {
 }
 
 @Composable
-internal fun StatusCard(state: ConnectionState, name: String?) {
+internal fun StatusCard(state: ConnectionState, name: String?, ecuResponding: Boolean = false) {
     val cs = MaterialTheme.colorScheme
     val icon: ImageVector
     val text: String
@@ -242,7 +266,7 @@ internal fun StatusCard(state: ConnectionState, name: String?) {
     when (state) {
         ConnectionState.Connected -> {
             icon = Icons.Rounded.BluetoothConnected
-            text = "Подключено" + (name?.let { " · $it" } ?: "")
+            text = "Адаптер: подключён" + (name?.let { " · $it" } ?: "")
             bg = cs.primaryContainer
             fg = cs.onPrimaryContainer
         }
@@ -260,10 +284,27 @@ internal fun StatusCard(state: ConnectionState, name: String?) {
         }
     }
     Surface(shape = RoundedCornerShape(20.dp), color = bg, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = fg)
-            Spacer(Modifier.width(16.dp))
-            Text(text, color = fg, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Column(Modifier.padding(vertical = 16.dp, horizontal = 20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, null, tint = fg)
+                Spacer(Modifier.width(16.dp))
+                Text(text, color = fg, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            }
+            // Отдельный статус ЭБУ: адаптер может быть подключён, но ЭБУ молчать
+            // (зажигание выключено / нет связи по шине) — это разные вещи.
+            if (state == ConnectionState.Connected) {
+                Spacer(Modifier.height(10.dp))
+                val ecuColor = if (ecuResponding) StatusGood else cs.tertiary
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(9.dp).clip(CircleShape).background(ecuColor))
+                    Spacer(Modifier.width(11.dp))
+                    Text(
+                        if (ecuResponding) "ЭБУ: отвечает, данные идут" else "ЭБУ: нет ответа — включите зажигание",
+                        color = fg,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
         }
     }
 }

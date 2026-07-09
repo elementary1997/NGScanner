@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
@@ -62,6 +63,7 @@ import androidx.compose.material.icons.rounded.Thermostat
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -84,29 +86,43 @@ internal enum class MetricStatus { NORMAL, WARNING, CRITICAL }
 internal fun Dashboard(
     metrics: Map<ObdPid, Double>,
     history: Map<ObdPid, List<MetricSample>>,
+    supportedPids: Set<String>,
     onDisconnect: () -> Unit,
     onOpenGraph: (ObdPid) -> Unit,
+    onOpenDtc: () -> Unit,
 ) {
     // Тап по прибору открывает полноэкранный график — навигация живёт в DevicesTab
     // (график заменяет весь экран, а не вкладывается в скролл дашборда).
     val onTap: (ObdPid) -> Unit = onOpenGraph
+    // Показываем только параметры, которые ЭБУ реально поддерживает (по 0100/0120/0140);
+    // если определить не удалось (пусто) — показываем все, как раньше.
+    fun shown(pid: ObdPid) = supportedPids.isEmpty() || pid.cmd in supportedPids
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(13.dp)) {
             CircularGauge(ObdPid.RPM, metrics[ObdPid.RPM], onTap, Modifier.weight(1f))
             CircularGauge(ObdPid.COOLANT, metrics[ObdPid.COOLANT], onTap, Modifier.weight(1f))
         }
-        MetricsSection("Двигатель", listOf(ObdPid.ENGINE_LOAD, ObdPid.TIMING, ObdPid.SPEED), metrics, history, onTap)
+        MetricsSection("Двигатель", listOf(ObdPid.ENGINE_LOAD, ObdPid.TIMING, ObdPid.SPEED).filter(::shown), metrics, history, onTap)
         MetricsSection(
             "Впуск / Топливо",
             listOf(
                 ObdPid.THROTTLE, ObdPid.MAF, ObdPid.MAP, ObdPid.INTAKE_TEMP,
                 ObdPid.STFT, ObdPid.LTFT, ObdPid.O2_LAMBDA, ObdPid.FUEL_LEVEL,
-            ),
+            ).filter(::shown),
             metrics,
             history,
             onTap,
         )
-        MetricsSection("Электрика", listOf(ObdPid.VOLTAGE), metrics, history, onTap)
+        MetricsSection("Электрика", listOf(ObdPid.VOLTAGE).filter(::shown), metrics, history, onTap)
+        FilledTonalButton(
+            onClick = onOpenDtc,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            Icon(Icons.Rounded.Warning, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Коды неисправностей")
+        }
         OutlinedButton(
             onClick = onDisconnect,
             modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -127,6 +143,7 @@ private fun MetricsSection(
     history: Map<ObdPid, List<MetricSample>>,
     onTap: (ObdPid) -> Unit,
 ) {
+    if (pids.isEmpty()) return // все параметры секции не поддерживаются — не показываем заголовок
     Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -290,13 +307,20 @@ private fun CircularGauge(pid: ObdPid, value: Double?, onTap: (ObdPid) -> Unit, 
             contentAlignment = Alignment.Center,
         ) {
             Canvas(Modifier.fillMaxSize().padding(6.dp)) {
-                val stroke = Stroke(width = 13.dp.toPx(), cap = StrokeCap.Round)
-                drawArc(trackColor, 135f, 270f, useCenter = false, style = stroke)
+                val strokeW = 13.dp.toPx()
+                val stroke = Stroke(width = strokeW, cap = StrokeCap.Round)
+                // Инсетим овал на половину толщины: центральная линия дуги ложится на
+                // радиус (minDimension − strokeW)/2 и не обрезается краем — тогда
+                // светящаяся точка на конце ровно по ней, без съезда наружу/внутрь.
+                val inset = strokeW / 2f
+                val arcTopLeft = Offset(inset, inset)
+                val arcSize = Size(size.width - strokeW, size.height - strokeW)
+                drawArc(trackColor, 135f, 270f, useCenter = false, style = stroke, topLeft = arcTopLeft, size = arcSize)
                 if (value != null) {
-                    drawArc(arcBrush, 135f, 270f * fraction, useCenter = false, style = stroke)
-                    // Светящаяся точка на конце заполненной дуги.
+                    drawArc(arcBrush, 135f, 270f * fraction, useCenter = false, style = stroke, topLeft = arcTopLeft, size = arcSize)
+                    // Светящаяся точка на конце заполненной дуги — по центральной линии.
                     val angle = Math.toRadians((135f + 270f * fraction).toDouble())
-                    val radius = (size.minDimension - stroke.width) / 2f
+                    val radius = (size.minDimension - strokeW) / 2f
                     val dot = Offset(
                         center.x + radius * cos(angle).toFloat(),
                         center.y + radius * sin(angle).toFloat(),

@@ -68,6 +68,12 @@ import ru.ngscanner.util.Exporter
 
 enum class ConnectionState { Disconnected, Connecting, Connected }
 
+/** Категория диагностического кода: активный (Mode 03), pending (07), permanent (0A). */
+enum class DtcCategory { ACTIVE, PENDING, PERMANENT }
+
+/** Диагностический код с расшифровкой из локальной базы и категорией. */
+data class DtcItem(val code: String, val description: String?, val category: DtcCategory)
+
 @kotlinx.serialization.Serializable
 data class DeviceUi(val name: String, val address: String)
 
@@ -95,8 +101,17 @@ data class UiState(
     val connection: ConnectionState = ConnectionState.Disconnected,
     val connectedName: String? = null,
     val metrics: Map<ObdPid, Double> = emptyMap(),
+    // PID, которые реально поддерживает подключённый ЭБУ (пусто = показывать все)
+    val supportedPids: Set<String> = emptySet(),
+    // отвечает ли ЭБУ на запросы (данные идут) — отдельно от статуса адаптера
+    val ecuResponding: Boolean = false,
     // история значений с временными метками для графиков (последние точки на параметр)
     val history: Map<ObdPid, List<MetricSample>> = emptyMap(),
+    // чтение кодов неисправностей (Mode 03/07/0A) для экрана «Коды»
+    val dtcReading: Boolean = false,
+    val dtcChecked: Boolean = false,
+    val dtcItems: List<DtcItem> = emptyList(),
+    val dtcError: String? = null,
     // запись поездки: идёт ли, сохранённые поездки/события, выбор параметров панели графиков
     val recording: Boolean = false,
     val tripMetas: List<TripMeta> = emptyList(),
@@ -334,7 +349,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 lastAddress = address
                 ObdForegroundService.start(getApplication(), device.name)
                 _ui.update {
-                    it.copy(connection = ConnectionState.Connected, connectedName = device.name ?: address)
+                    it.copy(
+                        connection = ConnectionState.Connected,
+                        connectedName = device.name ?: address,
+                        // Показываем только поддерживаемые PID (+ напряжение через ATRV).
+                        // Пусто = определить не удалось, тогда дашборд покажет все.
+                        supportedPids = if (supportedPids.isEmpty()) emptySet() else supportedPids + ObdPid.VOLTAGE.cmd,
+                        ecuResponding = false,
+                    )
                 }
                 startTripRecording()
                 startPolling()
@@ -364,6 +386,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val v = runCatching { e.read(pid) }.getOrNull()
                     if (v != null) values[pid] = v
                 }
+                // Напряжение берём командой адаптера ATRV — надёжнее Mode 01 PID 42,
+                // который многие ЭБУ (в т.ч. на Ниве) не поддерживают.
+                runCatching { e.readAdapterVoltage() }.getOrNull()?.let { values[ObdPid.VOLTAGE] = it }
                 if (values.isNotEmpty()) {
                     val now = System.currentTimeMillis()
                     _ui.update { state ->
@@ -373,7 +398,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         }
                         // Мержим, а не заменяем: промах одного PID (норма для ELM327)
                         // не должен гасить остальные приборы в «—» до следующего цикла.
-                        state.copy(metrics = state.metrics + values, history = history)
+                        state.copy(metrics = state.metrics + values, history = history, ecuResponding = true)
                     }
                     recordTripSample(now, values)
                     checkBlackBox(now, values)
@@ -381,6 +406,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     lastDataAt = now
                 } else {
                     emptyStreak++
+                    // Несколько пустых циклов подряд — ЭБУ молчит (зажигание выкл / шина).
+                    if (emptyStreak >= 2 && _ui.value.ecuResponding) _ui.update { it.copy(ecuResponding = false) }
                 }
                 // Обрыв связи с адаптером — уходим в авто-переподключение.
                 if (transport?.isConnected == false) {
@@ -544,6 +571,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 connectedName = null,
                 metrics = emptyMap(),
                 history = emptyMap(),
+                supportedPids = emptySet(),
+                ecuResponding = false,
             )
         }
     }
@@ -746,6 +775,80 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         sb.append("_Это офлайн-вывод по кодам и параметрам. Для развёрнутого разбора причин " +
             "включите интернет и запустите диагностику через ИИ._")
         return sb.toString()
+    }
+
+    // ---- Экран кодов неисправностей ----
+
+    /** Читает коды всех типов (Mode 03/07/0A), расшифровывает по локальной базе. */
+    fun readDtcCodes() {
+        val e = elm ?: run {
+            _ui.update { it.copy(dtcError = "Адаптер не подключён — подключитесь на вкладке «Приборы».", dtcChecked = true) }
+            return
+        }
+        if (_ui.value.dtcReading || _ui.value.diagnosing || _ui.value.vinScanning) return
+        runDtcOp { readAllDtc(e) }
+    }
+
+    /** Сброс кодов (Mode 04) из экрана «Коды» — вызывать только после подтверждения в UI. */
+    fun clearDtcCodes() {
+        val e = elm ?: return
+        if (_ui.value.dtcReading || _ui.value.diagnosing) return
+        runDtcOp { withContext(Dispatchers.IO) { e.command("04") }; readAllDtc(e) }
+    }
+
+    /** Общая обвязка операций с кодами: пауза опроса, флаги, восстановление. */
+    private fun runDtcOp(op: suspend () -> Pair<List<DtcItem>, Boolean>) {
+        _ui.update { it.copy(dtcReading = true, dtcError = null) }
+        val wasPolling = pollJob?.isActive == true
+        stopPolling()
+        viewModelScope.launch {
+            try {
+                val (items, busError) = op()
+                _ui.update {
+                    it.copy(
+                        dtcReading = false, dtcChecked = true, dtcItems = items,
+                        dtcError = if (busError && items.isEmpty()) {
+                            "Нет связи с ЭБУ (ошибка шины). Проверьте зажигание и разъём OBD."
+                        } else {
+                            null
+                        },
+                    )
+                }
+            } catch (ex: Exception) {
+                _ui.update { it.copy(dtcReading = false, dtcChecked = true, dtcError = "Ошибка: ${ex.message}") }
+            } finally {
+                if (wasPolling && elm != null) startPolling()
+            }
+        }
+    }
+
+    /** Читает и расшифровывает коды всех трёх режимов; второй элемент — была ли ошибка шины. */
+    private suspend fun readAllDtc(e: Elm327): Pair<List<DtcItem>, Boolean> = withContext(Dispatchers.IO) {
+        val app = getApplication<Application>()
+        val isCan = e.isCan()
+        val hl = e.headerHexLen()
+        val out = mutableListOf<DtcItem>()
+        var bus = false
+        suspend fun read(cmd: String, header: String, cat: DtcCategory) {
+            when (val r = ObdParser.parseDtcs(e.command(cmd), isCan, hl, header)) {
+                is ObdParser.DtcResult.Ok -> r.codes.forEach { out.add(DtcItem(it, DtcDatabase.describe(app, it), cat)) }
+                ObdParser.DtcResult.BusError -> bus = true
+                else -> {}
+            }
+        }
+        read("03", "43", DtcCategory.ACTIVE)
+        read("07", "47", DtcCategory.PENDING)
+        read("0A", "4A", DtcCategory.PERMANENT)
+        out.toList() to bus
+    }
+
+    /** Отправляет агенту запрос разобрать причины и ремонт по конкретному коду. */
+    fun explainDtc(item: DtcItem) {
+        val desc = item.description?.let { " ($it)" } ?: ""
+        sendMessage(
+            "Диагностический код ${item.code}$desc обнаружен на моей машине. Объясни простыми " +
+                "словами вероятные причины, как проверить и как устранить.",
+        )
     }
 
     /** Показывает диалог подтверждения сброса кодов и ждёт ответа пользователя. */
@@ -974,8 +1077,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     _ui.update { it.copy(vinScanning = false, ecuVin = vin) }
                     decodeVin(vin) // сразу распознаём марку/модель/год
                 } else {
+                    // NO DATA = ЭБУ не поддерживает Mode 09 (частое на ЭБУ Нивы/ВАЗ и
+                    // других российских). Это не сбой — просто вводим VIN вручную.
+                    val noData = raw.uppercase().let { "NO DATA" in it || "NODATA" in it }
                     _ui.update {
-                        it.copy(vinScanning = false, vinError = "ЭБУ не вернул VIN (ответ: ${raw.trim().take(40)}). Введите вручную.")
+                        it.copy(
+                            vinScanning = false,
+                            vinError = if (noData) {
+                                "Этот ЭБУ не отдаёт VIN по OBD (Mode 09 не поддерживается — обычное дело для ВАЗ/Нивы). Введите VIN вручную."
+                            } else {
+                                "Не удалось прочитать VIN (ответ: ${raw.trim().take(40)}). Введите вручную."
+                            },
+                        )
                     }
                 }
             } catch (ex: Exception) {

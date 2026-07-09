@@ -87,6 +87,16 @@ class Elm327(private val transport: ObdTransport) {
         return supported
     }
 
+    /**
+     * Напряжение на разъёме OBD по команде адаптера `ATRV` (это бортовое напряжение).
+     * Надёжный источник, когда ЭБУ не поддерживает Mode 01 PID 42 (частый случай на
+     * старых/российских ЭБУ). Ответ вида «12.3V» → 12.3; `null`, если не распознан.
+     */
+    suspend fun readAdapterVoltage(): Double? {
+        val raw = command("ATRV")
+        return Regex("([0-9]+\\.?[0-9]*)").find(raw)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
+    }
+
     /** Обороты двигателя (Mode 01, PID 0C). `null`, если ответ не распознан. */
     suspend fun readEngineRpm(): Int? = ObdParser.parseRpm(command("010C"))
 

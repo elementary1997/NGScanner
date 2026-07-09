@@ -3,6 +3,7 @@
 package ru.ngscanner.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,12 +20,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.background
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -42,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
@@ -65,10 +67,11 @@ private val OVERLAY_COLORS = listOf(
 )
 
 /**
- * Полноэкранный график параметра: линия с осью времени, пунктирными линиями
- * порогов (warn/crit), статистикой окна (мин/сред/макс/разброс) и возможностью
- * наложить другие параметры на ту же ось времени — чтобы видеть взаимосвязь
- * (например, скачет ли топливная коррекция именно на разгоне).
+ * Полноэкранный график параметра: крупная линия с осями времени и значений,
+ * пунктирными порогами, статистикой окна и возможностью наложить другие
+ * параметры на ту же ось времени. Открывается по тапу с приборов; для комбо-
+ * связки приходит предвыбранный набор [initialOverlay] — тогда это «редактор»
+ * графика, где серии сразу наложены и их можно менять.
  */
 @Composable
 internal fun ParameterGraphScreen(
@@ -86,13 +89,12 @@ internal fun ParameterGraphScreen(
     val samples = history[pid].orEmpty()
     val status = metricStatus(pid, value)
     val primaryColor = if (status == MetricStatus.NORMAL) cs.primary else statusColor(status)
+    val isCombo = initialOverlay.isNotEmpty()
 
     // Параметры, доступные для наложения: те, у кого есть история, кроме основного.
     val available = remember(history) {
         history.filter { it.key != pid && it.value.size >= 2 }.keys.sortedBy { it.ordinal }
     }
-    // Транзиентный выбор наложенных серий (Set не сохраняется в Bundle — только remember).
-    // Для комбо-графика приходит предвыбранный набор параметров.
     var selected by remember { mutableStateOf(initialOverlay) }
     val overlays = available
         .filter { it.name in selected }
@@ -106,51 +108,69 @@ internal fun ParameterGraphScreen(
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Назад") }
             Spacer(Modifier.width(4.dp))
             Column(Modifier.weight(1f)) {
-                Text(pid.label, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "PID ${pid.cmd}",
+                    if (isCombo) "Связка параметров" else pid.label,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    if (isCombo) "основной: ${pid.label}" else "PID ${pid.cmd}",
                     style = MaterialTheme.typography.labelMedium,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = if (isCombo) FontFamily.Default else FontFamily.Monospace,
                     color = cs.onSurfaceVariant,
                 )
             }
-            Text(
-                value?.let { "${formatMetric(it)} ${pid.unit}" } ?: "нет данных",
-                style = MaterialTheme.typography.titleMedium,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-                color = if (value == null || status == MetricStatus.NORMAL) cs.onSurface else primaryColor,
-            )
+            if (!isCombo) {
+                Text(
+                    value?.let { "${formatMetric(it)} ${pid.unit}" } ?: "нет данных",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (value == null || status == MetricStatus.NORMAL) cs.onSurface else primaryColor,
+                )
+            }
         }
 
         if (samples.size >= 2) {
             val yRange = yRangeFor(pid, samples)
             val durationSec = ((samples.last().tMs - samples.first().tMs) / 1000L).toInt()
-            Row(Modifier.fillMaxWidth().height(220.dp)) {
-                // Ось значений: max сверху, min снизу.
-                Column(
-                    Modifier.fillMaxSize().width(44.dp).padding(vertical = 2.dp),
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    AxisLabel(formatMetric(yRange.second))
-                    AxisLabel(formatMetric((yRange.first + yRange.second) / 2))
-                    AxisLabel(formatMetric(yRange.first))
+
+            // График в карточке: ось значений слева, поле графика, ось времени снизу.
+            ElevatedCard(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp)) {
+                    Row(Modifier.fillMaxWidth().height(230.dp)) {
+                        Column(
+                            Modifier.fillMaxSize().width(46.dp).padding(vertical = 2.dp),
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            AxisLabel(formatMetric(yRange.second))
+                            AxisLabel(formatMetric((yRange.first * 0.25 + yRange.second * 0.75)))
+                            AxisLabel(formatMetric((yRange.first + yRange.second) / 2))
+                            AxisLabel(formatMetric((yRange.first * 0.75 + yRange.second * 0.25)))
+                            AxisLabel(formatMetric(yRange.first))
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        TimeSeriesChart(pid, samples, primaryColor, overlays, yRange, Modifier.weight(1f).fillMaxSize())
+                    }
+                    Row(Modifier.fillMaxWidth().padding(start = 54.dp, top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        AxisLabel(if (durationSec >= 120) "−${durationSec / 60} мин" else "−$durationSec с")
+                        AxisLabel("сейчас")
+                    }
                 }
-                Spacer(Modifier.width(6.dp))
-                TimeSeriesChart(pid, samples, primaryColor, overlays, yRange, Modifier.weight(1f).fillMaxSize())
             }
-            // Ось времени.
-            Row(Modifier.fillMaxWidth().padding(start = 50.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                AxisLabel(if (durationSec >= 120) "−${durationSec / 60} мин" else "−$durationSec с")
-                AxisLabel("сейчас")
-            }
+
+            // Легенда серий с цветами и текущими значениями — понятно, что где.
+            LegendRow(pid, value, primaryColor, overlays)
+
+            // Подпись порогов, если заданы (чтобы пунктир читался).
+            ThresholdLegend(pid)
 
             StatsRow(samples, pid)
 
             if (available.isNotEmpty()) {
                 Text(
-                    "НАЛОЖИТЬ ПАРАМЕТР",
+                    if (isCombo) "ПАРАМЕТРЫ СВЯЗКИ" else "НАЛОЖИТЬ ПАРАМЕТР",
                     style = MaterialTheme.typography.labelSmall,
                     letterSpacing = 1.sp,
                     color = cs.onSurfaceVariant,
@@ -171,6 +191,14 @@ internal fun ParameterGraphScreen(
                             colors = FilterChipDefaults.filterChipColors(),
                         )
                     }
+                }
+                if (overlays.isNotEmpty()) {
+                    Text(
+                        "Наложенные линии нормированы по форме (свой масштаб) — сравнивайте " +
+                            "поведение во времени, а не абсолютные значения.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = cs.onSurfaceVariant,
+                    )
                 }
             }
         } else {
@@ -216,6 +244,50 @@ internal fun ParameterGraphScreen(
     }
 }
 
+/** Легенда: основная серия и наложенные — цвет, имя, текущее значение. */
+@Composable
+private fun LegendRow(pid: ObdPid, value: Double?, primaryColor: Color, overlays: List<OverlaySeries>) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        LegendItem(primaryColor, pid.label, value?.let { "${formatMetric(it)} ${pid.unit}" } ?: "—")
+        overlays.forEach { ov ->
+            val last = ov.samples.lastOrNull()?.value
+            LegendItem(ov.color, ov.pid.label, last?.let { "${formatMetric(it)} ${ov.pid.unit}" } ?: "—")
+        }
+    }
+}
+
+@Composable
+private fun LegendItem(color: Color, name: String, value: String) {
+    val cs = MaterialTheme.colorScheme
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(10.dp).clip(CircleShape).background(color))
+        Spacer(Modifier.width(6.dp))
+        Text(name, style = MaterialTheme.typography.labelMedium, color = cs.onSurface)
+        Spacer(Modifier.width(5.dp))
+        Text(value, style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = cs.onSurfaceVariant)
+    }
+}
+
+/** Подпись пороговых линий (пунктир на графике) — чтобы было ясно, что это. */
+@Composable
+private fun ThresholdLegend(pid: ObdPid) {
+    val cs = MaterialTheme.colorScheme
+    val parts = buildList {
+        if (pid.critHigh != null || pid.critLow != null) add(GaugeRed to "критично")
+        if (pid.warnHigh != null || pid.warnLow != null) add(Color(0xFFF2A65A) to "внимание")
+    }
+    if (parts.isEmpty()) return
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        parts.forEach { (c, label) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(width = 14.dp, height = 2.dp).background(c.copy(alpha = 0.7f)))
+                Spacer(Modifier.width(6.dp))
+                Text("порог: $label", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            }
+        }
+    }
+}
+
 @Composable
 private fun AxisLabel(text: String) {
     Text(
@@ -232,21 +304,29 @@ private fun StatsRow(samples: List<MetricSample>, pid: ObdPid) {
     val vals = samples.map { it.value }
     val min = vals.min()
     val max = vals.max()
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Stat("мин", "${formatMetric(min)} ${pid.unit}")
-        Stat("сред", "${formatMetric(vals.average())} ${pid.unit}")
-        Stat("макс", "${formatMetric(max)} ${pid.unit}")
-        Stat("разброс", "${formatMetric(max - min)} ${pid.unit}")
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        StatPill("мин", "${formatMetric(min)} ${pid.unit}", Modifier.weight(1f))
+        StatPill("сред", "${formatMetric(vals.average())} ${pid.unit}", Modifier.weight(1f))
+        StatPill("макс", "${formatMetric(max)} ${pid.unit}", Modifier.weight(1f))
+        StatPill("разброс", "${formatMetric(max - min)} ${pid.unit}", Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun Stat(caption: String, value: String) {
+private fun StatPill(caption: String, value: String, modifier: Modifier) {
     val cs = MaterialTheme.colorScheme
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(caption.uppercase(), style = MaterialTheme.typography.labelSmall, letterSpacing = 0.8.sp, color = cs.onSurfaceVariant)
-        Spacer(Modifier.height(3.dp))
-        Text(value, style = MaterialTheme.typography.labelLarge, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+    Surface(shape = RoundedCornerShape(12.dp), color = cs.surfaceVariant.copy(alpha = 0.5f), modifier = modifier) {
+        Column(Modifier.padding(vertical = 10.dp, horizontal = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(caption.uppercase(), style = MaterialTheme.typography.labelSmall, letterSpacing = 0.6.sp, color = cs.onSurfaceVariant)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+        }
     }
 }
 
@@ -264,7 +344,7 @@ internal fun yRangeFor(pid: ObdPid, samples: List<MetricSample>): Pair<Double, D
 /**
  * Линейный график по времени: сетка, пунктирные пороги, наложенные серии
  * (нормируются к своему диапазону — сравнение по форме) и основная линия с
- * заливкой. Ось X — реальное время из [MetricSample.tMs].
+ * градиентной заливкой. Ось X — реальное время из [MetricSample.tMs].
  */
 @Composable
 private fun TimeSeriesChart(
@@ -282,6 +362,7 @@ private fun TimeSeriesChart(
     val tSpan = (tMax - tMin).coerceAtLeast(1L).toDouble()
     val (yMin, yMax) = yRange
     val ySpan = (yMax - yMin).coerceAtLeast(1e-6)
+    val fill = Brush.verticalGradient(listOf(primaryColor.copy(alpha = 0.22f), primaryColor.copy(alpha = 0.02f)))
 
     Canvas(modifier) {
         val w = size.width
@@ -289,10 +370,14 @@ private fun TimeSeriesChart(
         fun xAt(t: Long) = (((t - tMin).toDouble()) / tSpan).toFloat() * w
         fun yPrimary(v: Double) = h - (((v - yMin) / ySpan).toFloat()) * h
 
-        // Сетка.
+        // Сетка: горизонтали и несколько вертикалей.
         for (i in 0..4) {
             val y = h * i / 4f
             drawLine(grid, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+        }
+        for (i in 1..3) {
+            val x = w * i / 4f
+            drawLine(grid.copy(alpha = 0.12f), Offset(x, 0f), Offset(x, h), strokeWidth = 1f)
         }
         // Пороги пунктиром.
         val dash = PathEffect.dashPathEffect(floatArrayOf(9f, 9f))
@@ -315,13 +400,13 @@ private fun TimeSeriesChart(
             ov.samples.forEachIndexed { i, s ->
                 val x = xAt(s.tMs)
                 val norm = ((s.value - vLo) / span).toFloat()
-                val y = h - (norm * h * 0.9f) - h * 0.05f // отступ 5% сверху/снизу
+                val y = h - (norm * h * 0.9f) - h * 0.05f
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
-            drawPath(path, ov.color.copy(alpha = 0.85f), style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path, ov.color.copy(alpha = 0.9f), style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
         }
 
-        // Основная линия с заливкой.
+        // Основная линия с градиентной заливкой.
         val line = Path()
         val area = Path().apply { moveTo(xAt(primary.first().tMs), h) }
         primary.forEachIndexed { i, s ->
@@ -332,8 +417,9 @@ private fun TimeSeriesChart(
         }
         area.lineTo(xAt(primary.last().tMs), h)
         area.close()
-        drawPath(area, primaryColor.copy(alpha = 0.12f))
-        drawPath(line, primaryColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
-        drawCircle(primaryColor, 3.5.dp.toPx(), Offset(xAt(primary.last().tMs), yPrimary(primary.last().value)))
+        drawPath(area, fill)
+        drawPath(line, primaryColor, style = Stroke(width = 2.8.dp.toPx(), cap = StrokeCap.Round))
+        drawCircle(primaryColor, 4.dp.toPx(), Offset(xAt(primary.last().tMs), yPrimary(primary.last().value)))
+        drawCircle(Color(0xFFEAFFFB), 1.6.dp.toPx(), Offset(xAt(primary.last().tMs), yPrimary(primary.last().value)))
     }
 }

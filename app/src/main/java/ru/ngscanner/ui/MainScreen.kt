@@ -153,6 +153,9 @@ fun MainScreen(vm: MainViewModel) {
                         onDeleteTrip = vm::deleteTrip,
                         onExportTrip = vm::exportTripCsv,
                         loadTrip = vm::loadTrip,
+                        onReadDtc = vm::readDtcCodes,
+                        onClearDtc = vm::clearDtcCodes,
+                        onExplainDtc = { item -> vm.explainDtc(item); goToTab(Tab.Chat) },
                     )
                     Tab.Chat -> ChatTab(
                         ui,
