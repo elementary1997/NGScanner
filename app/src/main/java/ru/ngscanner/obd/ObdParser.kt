@@ -59,6 +59,17 @@ object ObdParser {
         return "$system$d1" + "%03X".format(rest)
     }
 
+    /** Байты данных (A,B,…) из ответа на команду «01XX» → после заголовка «41XX». */
+    fun dataBytes(raw: String, cmd: String): IntArray? {
+        val hex = normalize(raw)
+        val prefix = "41" + cmd.uppercase().removePrefix("01")
+        val idx = hex.indexOf(prefix)
+        if (idx < 0) return null
+        val dataHex = hex.substring(idx + prefix.length)
+        if (dataHex.length < 2) return null
+        return dataHex.chunked(2).filter { it.length == 2 }.map { it.toInt(16) }.toIntArray()
+    }
+
     private fun normalize(raw: String): String =
         raw.uppercase().replace(Regex("[^0-9A-F]"), "")
 }

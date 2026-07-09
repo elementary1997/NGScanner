@@ -10,7 +10,7 @@ class ObdPidTest {
 
     @Test
     fun engineRpmPidIsCorrect() {
-        assertEquals("010C", ObdPid.ENGINE_RPM.pid)
+        assertEquals("010C", ObdPid.RPM.cmd)
     }
 
     @Test

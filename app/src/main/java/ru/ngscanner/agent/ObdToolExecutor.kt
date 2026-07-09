@@ -81,11 +81,22 @@ class ObdToolExecutor(
     }
 
     private suspend fun readNamedPid(elm: Elm327, name: String): String? {
-        return when (val upper = name.uppercase()) {
-            "RPM", "ENGINE_RPM" -> elm.readEngineRpm()?.let { "$it об/мин" }
-            "COOLANT_TEMP", "COOLANT" -> elm.readCoolantTemp()?.let { "$it °C" }
-            else -> ObdPid.entries.firstOrNull { it.name == upper }
-                ?.let { "сырой ответ: ${elm.command(it.pid)}" }
-        }
+        val pid = matchPid(name) ?: return null
+        val value = elm.read(pid) ?: return null
+        return "${formatValue(value)} ${pid.unit}"
     }
+
+    private fun matchPid(name: String): ObdPid? {
+        val u = name.uppercase()
+        return ObdPid.entries.firstOrNull { it.name == u }
+            ?: when (u) {
+                "ENGINE_RPM" -> ObdPid.RPM
+                "VEHICLE_SPEED" -> ObdPid.SPEED
+                "COOLANT_TEMP" -> ObdPid.COOLANT
+                else -> null
+            }
+    }
+
+    private fun formatValue(v: Double): String =
+        if (v == v.toLong().toDouble()) v.toLong().toString() else "%.1f".format(v)
 }

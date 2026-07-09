@@ -24,6 +24,12 @@ class Elm327(private val transport: ObdTransport) {
         return transport.readResponse()
     }
 
+    /** Прочитать и декодировать параметр Mode 01; `null`, если ответ не распознан. */
+    suspend fun read(pid: ObdPid): Double? {
+        val data = ObdParser.dataBytes(command(pid.cmd), pid.cmd) ?: return null
+        return runCatching { pid.decode(data) }.getOrNull()
+    }
+
     /** Обороты двигателя (Mode 01, PID 0C). `null`, если ответ не распознан. */
     suspend fun readEngineRpm(): Int? = ObdParser.parseRpm(command("010C"))
 
