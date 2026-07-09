@@ -158,6 +158,7 @@ fun MainScreen(vm: MainViewModel) {
                         onRestore = vm::restoreSession,
                         onAttachImage = vm::attachImage,
                         onClearImage = vm::clearPendingImage,
+                        onExportPdf = vm::exportMessagePdf,
                     )
                     Tab.Garage -> GarageTab(ui, vm)
                     Tab.Settings -> SettingsTab(

@@ -32,7 +32,10 @@ object Exporter {
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, "Сохранить или отправить PDF"))
+        // NEW_TASK: вызывается с application-контекста (из ViewModel), не из Activity.
+        val chooser = Intent.createChooser(intent, "Сохранить или отправить PDF")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
     }
 
     /**
@@ -49,31 +52,37 @@ object Exporter {
         val maxWidth = pageWidth - 2 * margin
         val lineHeight = 18f
 
-        val pdf = PdfDocument()
-        var pageNo = 1
-        var page = pdf.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNo).create())
-        var canvas = page.canvas
-        var y = margin + 16f
-        canvas.drawText(title.take(80), margin, y, titlePaint)
-        y += 26f
-
-        for (line in wrap(text, bodyPaint, maxWidth)) {
-            if (y > pageHeight - margin) {
-                pdf.finishPage(page)
-                pageNo++
-                page = pdf.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNo).create())
-                canvas = page.canvas
-                y = margin + 16f
-            }
-            canvas.drawText(line, margin, y, bodyPaint)
-            y += lineHeight
-        }
-        pdf.finishPage(page)
-
         val dir = File(context.cacheDir, "shared").apply { mkdirs() }
+        // Чистим прежние экспорты, чтобы кэш не рос.
+        dir.listFiles()?.forEach { runCatching { it.delete() } }
         val file = File(dir, "ngscanner_$fileTag.pdf")
-        FileOutputStream(file).use { pdf.writeTo(it) }
-        pdf.close()
+
+        val pdf = PdfDocument()
+        try {
+            var pageNo = 1
+            var page = pdf.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNo).create())
+            var canvas = page.canvas
+            var y = margin + 16f
+            canvas.drawText(title.take(80), margin, y, titlePaint)
+            y += 26f
+
+            for (line in wrap(text, bodyPaint, maxWidth)) {
+                if (y > pageHeight - margin) {
+                    pdf.finishPage(page)
+                    pageNo++
+                    page = pdf.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNo).create())
+                    canvas = page.canvas
+                    y = margin + 16f
+                }
+                canvas.drawText(line, margin, y, bodyPaint)
+                y += lineHeight
+            }
+            pdf.finishPage(page)
+            FileOutputStream(file).use { pdf.writeTo(it) }
+        } finally {
+            // Даже при сбое I/O освобождаем нативную память документа/страниц.
+            pdf.close()
+        }
         return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
 
@@ -110,8 +119,13 @@ object Exporter {
         return out
     }
 
-    /** Убирает основную markdown-разметку, чтобы в PDF был чистый текст. */
+    /**
+     * Убирает основную markdown-разметку, чтобы в PDF был чистый текст. Таблицы
+     * сплющиваются вызывающей стороной (flattenMarkdownTables) до передачи сюда.
+     */
     private fun stripMarkdown(s: String): String = s
+        // [текст](url) → «текст (url)»; ссылки-картинки ![alt](url) → «alt (url)».
+        .replace(Regex("!?\\[([^\\]]*)\\]\\(([^)]+)\\)"), "$1 ($2)")
         .replace("**", "")
         .replace("`", "")
         .replace(Regex("(?m)^\\s{0,3}#{1,6}\\s*"), "")

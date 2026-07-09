@@ -48,6 +48,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -247,8 +248,12 @@ private fun UsageContent(
         )
     } else {
         HorizontalDivider(color = cs.outlineVariant)
+        // key по модели: при фоновой пересортировке списка (расход обновился) слот
+        // строки не переносится на другую модель — недопечатанная цена не теряется.
         ui.modelUsage.forEach { usage ->
-            ModelUsageRow(usage, ui.modelPrices[usage.model], onSetPrice) { onRemove(usage.model) }
+            key(usage.model) {
+                ModelUsageRow(usage, ui.modelPrices[usage.model], onSetPrice) { onRemove(usage.model) }
+            }
         }
     }
 

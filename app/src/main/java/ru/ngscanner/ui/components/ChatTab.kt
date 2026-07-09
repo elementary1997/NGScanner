@@ -16,9 +16,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import ru.ngscanner.llm.LlmImage
 import ru.ngscanner.util.Exporter
 import ru.ngscanner.util.ImageEncoder
@@ -109,6 +107,7 @@ internal fun ChatTab(
     onRestore: (String) -> Unit,
     onAttachImage: (LlmImage) -> Unit,
     onClearImage: () -> Unit,
+    onExportPdf: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
     val visionEnabled = isVisionModel(ui.provider, ui.model)
@@ -143,7 +142,7 @@ internal fun ChatTab(
                     )
                 }
             }
-            items(ui.chat) { msg -> ChatBubble(msg) }
+            items(ui.chat) { msg -> ChatBubble(msg, onExportPdf) }
             if (ui.diagnosing) {
                 item {
                     Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -356,7 +355,7 @@ private fun SessionsBlock(sessions: List<SessionSummary>, onRestore: (String) ->
 }
 
 @Composable
-private fun ChatBubble(msg: ChatMessage) {
+private fun ChatBubble(msg: ChatMessage, onExportPdf: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
 
     // Служебный статус инструмента — компактная строка, как «думаю…» у агента.
@@ -389,7 +388,6 @@ private fun ChatBubble(msg: ChatMessage) {
     val widthFraction = if (msg.role == ChatRole.ASSISTANT) 1f else 0.9f
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     var menuOpen by remember { mutableStateOf(false) }
     var pressAt by remember { mutableStateOf(Offset.Zero) }
@@ -456,12 +454,9 @@ private fun ChatBubble(msg: ChatMessage) {
                         leadingIcon = { Icon(Icons.Rounded.PictureAsPdf, null) },
                         onClick = {
                             menuOpen = false
-                            scope.launch {
-                                val uri = withContext(Dispatchers.IO) {
-                                    Exporter.buildPdf(context, "Ответ NG Scanner", msg.text, msg.text.hashCode().toLong())
-                                }
-                                Exporter.sharePdf(context, uri)
-                            }
+                            // Сборку/шаринг и обработку ошибок держит ViewModel (viewModelScope),
+                            // чтобы экспорт пережил прокрутку списка. Таблицы сплющиваем заранее.
+                            onExportPdf(flattenMarkdownTables(msg.text))
                         },
                     )
                 }

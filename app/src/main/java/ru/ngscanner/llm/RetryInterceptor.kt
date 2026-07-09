@@ -5,6 +5,7 @@ import okhttp3.Response
 import java.io.IOException
 import java.net.ConnectException
 import java.net.UnknownHostException
+import javax.net.ssl.SSLHandshakeException
 
 /**
  * Повторяет запрос при временных ошибках (429/408/5xx, включая Anthropic 529
@@ -27,9 +28,11 @@ class RetryInterceptor(private val maxRetries: Int = 3) : Interceptor {
                 // тела, сервер мог уже сгенерировать (и списать) ответ — повтор дал бы
                 // второй completion и двойное списание. Поэтому IOException ретраим
                 // только для идемпотентного GET или заведомо до-серверных сбоев
-                // (соединение не установилось — ответа физически быть не могло).
+                // (соединение/TLS не установились — ответа физически быть не могло).
+                // SSLHandshakeException — сбой рукопожатия до отправки запроса: частый
+                // случай на слабом Wi-Fi, ретрай безопасен (двойного списания нет).
                 val safeToRetry = chain.request().method == "GET" ||
-                    e is ConnectException || e is UnknownHostException
+                    e is ConnectException || e is UnknownHostException || e is SSLHandshakeException
                 if (attempt >= maxRetries || chain.call().isCanceled() || !safeToRetry) throw e
                 sleepBackoff(chain, BASE_DELAY_MS shl attempt)
                 attempt++

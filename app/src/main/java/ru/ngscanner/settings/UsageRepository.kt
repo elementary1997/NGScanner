@@ -69,7 +69,13 @@ class UsageRepository(context: Context) {
     /** Цены по id модели (общая карта для всех провайдеров). */
     fun prices(): Map<String, ModelPrice> {
         val raw = prefs.getString(KEY_PRICES, null) ?: return emptyMap()
-        return runCatching { json.decodeFromString<Map<String, ModelPrice>>(raw) }.getOrDefault(emptyMap())
+        runCatching { json.decodeFromString<Map<String, ModelPrice>>(raw) }.getOrNull()?.let { return it }
+        // Миграция старого формата {model: 1500.0}: единая цена шла на все токены,
+        // поэтому переносим её и во вход, и в выход (сумма сохраняется), и пересохраняем.
+        val legacy = runCatching { json.decodeFromString<Map<String, Double>>(raw) }.getOrNull() ?: return emptyMap()
+        val migrated = legacy.mapValues { (_, v) -> ModelPrice(v, v) }
+        prefs.edit().putString(KEY_PRICES, json.encodeToString(migrated)).apply()
+        return migrated
     }
 
     /** Задаёт цену модели (обе нулевые — убирает) и возвращает обновлённую карту. */

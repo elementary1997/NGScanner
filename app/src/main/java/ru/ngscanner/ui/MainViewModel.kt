@@ -2,6 +2,7 @@ package ru.ngscanner.ui
 
 import android.annotation.SuppressLint
 import android.app.Application
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
@@ -56,6 +57,7 @@ import ru.ngscanner.settings.ModelUsage
 import ru.ngscanner.settings.SessionSummary
 import ru.ngscanner.settings.UsageRepository
 import ru.ngscanner.transport.ClassicSppTransport
+import ru.ngscanner.util.Exporter
 
 enum class ConnectionState { Disconnected, Connecting, Connected }
 
@@ -470,13 +472,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         appendChat(ChatMessage(ChatRole.USER, shown))
         _ui.update { it.copy(diagnosing = true, pendingImage = null) }
 
+        // Фиксируем провайдера и модель запроса: пока идёт диалог, их смена в UI
+        // заблокирована, но расход всё равно пишем на ту модель, что дала ответ.
+        val reqProvider = _ui.value.provider
+        val reqModel = _ui.value.model
+
         val executor = ObdToolExecutor(
             elm,
             allowClearDtcs = { requestClearConfirm() },
             saveNote = { note -> addSystemLogEntry(note) },
             describeDtc = { code -> DtcDatabase.describe(getApplication(), code) },
         )
-        val agent = DiagnosticAgent(buildProvider(_ui.value.provider, key), _ui.value.model, executor)
+        val agent = DiagnosticAgent(buildProvider(reqProvider, key), reqModel, executor)
         // На время диалога опрос приборов ставим на паузу: half-duplex сокет ELM327
         // не должен обслуживать опрос и инструменты агента одновременно.
         val wasPolling = pollJob?.isActive == true
@@ -487,7 +494,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     when (event) {
                         is AgentEvent.Assistant -> appendChat(ChatMessage(ChatRole.ASSISTANT, event.text))
                         is AgentEvent.ToolCall -> appendChat(ChatMessage(ChatRole.TOOL, toolStatusText(event.name)))
-                        is AgentEvent.Usage -> recordUsage(event.prompt, event.completion)
+                        is AgentEvent.Usage -> recordUsage(reqProvider, reqModel, event.prompt, event.completion)
                     }
                 })
             } catch (ex: CancellationException) {
@@ -646,12 +653,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(chat = it.chat + message) }
     }
 
-    /** Учитывает израсходованные токены помодельно: сессия (сумма) + расход текущей модели. */
-    private fun recordUsage(prompt: Int, completion: Int) {
+    /**
+     * Учитывает израсходованные токены помодельно: сессия (сумма) + расход модели.
+     * Провайдер и модель передаём явно — те, что дали ответ (могли смениться в UI,
+     * пока шёл запрос), а список moded обновляем только если это активный провайдер.
+     */
+    private fun recordUsage(provider: ProviderId, model: String, prompt: Int, completion: Int) {
         val tokens = prompt + completion
         if (tokens <= 0) return
-        val updated = usageRepo.add(_ui.value.provider, _ui.value.model, prompt, completion)
-        _ui.update { it.copy(sessionTokens = it.sessionTokens + tokens, modelUsage = updated) }
+        val updated = usageRepo.add(provider, model, prompt, completion)
+        _ui.update {
+            it.copy(
+                sessionTokens = it.sessionTokens + tokens,
+                modelUsage = if (provider == it.provider) updated else it.modelUsage,
+            )
+        }
+    }
+
+    /** Собирает PDF из ответа и открывает «Поделиться»; ошибку I/O показываем тостом. */
+    fun exportMessagePdf(text: String) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val uri = withContext(Dispatchers.IO) {
+                runCatching { Exporter.buildPdf(app, "Ответ NG Scanner", text, text.hashCode().toLong()) }.getOrNull()
+            }
+            if (uri != null) Exporter.sharePdf(app, uri)
+            else Toast.makeText(app, "Не удалось создать PDF", Toast.LENGTH_SHORT).show()
+        }
     }
 
     /** Сбрасывает помодельный счётчик расхода текущего провайдера. */
@@ -795,7 +823,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun fetchNorm(car: Car, pid: ObdPid, key: String): String? {
-        val provider = buildProvider(_ui.value.provider, key)
+        val reqProvider = _ui.value.provider
+        val reqModel = _ui.value.model
+        val provider = buildProvider(reqProvider, key)
         val system = "Ты — автомобильный справочник. Ответь ОДНОЙ короткой строкой: нормальный " +
             "диапазон значения параметра для указанной машины, с единицами измерения. Без пояснений " +
             "и вводных слов. Пример правильного ответа: 780–840 об/мин."
@@ -803,9 +833,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val userMsg = "Автомобиль: ${car.title}$spec. Параметр: ${pid.label} (${pid.unit}). " +
             "Общая норма: ${pid.norm}. Укажи типичную норму именно для этой машины."
         val response = provider.send(
-            LlmRequest(_ui.value.model, system, listOf(LlmMessage(Role.USER, content = userMsg)), emptyList()),
+            LlmRequest(reqModel, system, listOf(LlmMessage(Role.USER, content = userMsg)), emptyList()),
         )
-        response.usage?.let { recordUsage(it.prompt, it.completion) }
+        response.usage?.let { recordUsage(reqProvider, reqModel, it.prompt, it.completion) }
         return when (response) {
             is LlmResponse.Final -> response.text.trim().lineSequence().firstOrNull()?.take(80)?.ifBlank { null }
             is LlmResponse.ToolUse -> response.text?.trim()?.take(80)?.ifBlank { null }
@@ -860,6 +890,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Настройки ----
 
     fun setProvider(p: ProviderId) {
+        if (_ui.value.diagnosing) return // не меняем провайдера, пока идёт запрос — расход и ключ должны совпадать
         settings.provider = p
         _ui.update {
             it.copy(
@@ -875,6 +906,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setModel(m: String) {
+        if (_ui.value.diagnosing) return // не меняем модель на лету — расход учитываем по ответившей
         settings.model = m
         _ui.update { it.copy(model = m) }
     }

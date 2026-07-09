@@ -40,7 +40,13 @@ class CloudRuProvider(
 
     private val json = Json { ignoreUnknownKeys = true }
     private val http = OkHttpClient.Builder()
+        // callTimeout — общий потолок. read/connect держим щедрыми: ответ не стримим,
+        // а большая модель на длинном промпте до первого байта думает дольше дефолтных
+        // 10 c — иначе readTimeout валит запрос как «нет связи» задолго до потолка.
         .callTimeout(180, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .addInterceptor(RetryInterceptor())
         .build()
 
