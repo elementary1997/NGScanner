@@ -5,7 +5,16 @@ package ru.ngscanner.ui
 import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.rounded.AddPhotoAlternate
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.launch
+import ru.ngscanner.llm.LlmImage
+import ru.ngscanner.util.ImageEncoder
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,14 +32,30 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.rounded.Air
+import androidx.compose.material.icons.rounded.Compress
+import androidx.compose.material.icons.rounded.DataUsage
+import androidx.compose.material.icons.rounded.DeviceThermostat
+import androidx.compose.material.icons.rounded.LocalGasStation
+import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import ru.ngscanner.obd.ObdPid
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.BluetoothSearching
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.BluetoothDisabled
+import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.rounded.Chat
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.DirectionsCar
@@ -76,15 +101,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.mikepenz.markdown.m3.Markdown
 import ru.ngscanner.llm.LlmModel
 import ru.ngscanner.llm.ProviderId
 
 private enum class Tab(val label: String, val icon: ImageVector) {
     Devices("Приборы", Icons.Rounded.Speed),
-    Chat("Диагностика", Icons.Rounded.Chat),
+    Chat("Диагностика", Icons.AutoMirrored.Rounded.Chat),
     Settings("Настройки", Icons.Rounded.Settings),
 }
 
@@ -130,7 +157,6 @@ fun MainScreen(vm: MainViewModel) {
                     ui = ui,
                     onRefresh = { launcher.launch(permissions); vm.refreshDevices() },
                     onConnect = vm::connect,
-                    onRead = vm::readLiveData,
                     onDisconnect = vm::disconnect,
                 )
                 Tab.Chat -> ChatTab(ui, onSend = vm::sendMessage, onClear = vm::clearChat)
@@ -156,7 +182,6 @@ private fun DevicesTab(
     ui: UiState,
     onRefresh: () -> Unit,
     onConnect: (String) -> Unit,
-    onRead: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
     Column(
@@ -169,7 +194,7 @@ private fun DevicesTab(
         Spacer(Modifier.height(8.dp))
         StatusCard(ui.connection, ui.connectedName)
         when (ui.connection) {
-            ConnectionState.Connected -> Dashboard(ui, onRead, onDisconnect)
+            ConnectionState.Connected -> Dashboard(ui.metrics, onDisconnect)
             ConnectionState.Connecting -> ConnectingCard()
             ConnectionState.Disconnected -> DevicePicker(ui, onRefresh, onConnect)
         }
@@ -255,27 +280,22 @@ private fun DeviceRow(device: DeviceUi, onClick: () -> Unit) {
     }
 }
 
+private enum class MetricStatus { NORMAL, WARNING, CRITICAL }
+
 @Composable
-private fun Dashboard(ui: UiState, onRead: () -> Unit, onDisconnect: () -> Unit) {
+private fun Dashboard(metrics: Map<ObdPid, Double>, onDisconnect: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            MetricCard(Modifier.weight(1f), Icons.Rounded.Speed, "Обороты", ui.rpm?.toString() ?: "—", "об/мин")
-            MetricCard(Modifier.weight(1f), Icons.Rounded.Thermostat, "Темп. ОЖ", ui.coolantTemp?.toString() ?: "—", "°C")
+            CircularGauge(metrics[ObdPid.RPM], 7000f, 5500f, "Обороты", "об/мин", Modifier.weight(1f))
+            CircularGauge(metrics[ObdPid.COOLANT], 130f, 105f, "Темп. ОЖ", "°C", Modifier.weight(1f))
         }
-        Button(
-            onClick = onRead,
-            enabled = !ui.reading,
-            modifier = Modifier.fillMaxWidth().height(56.dp),
-            shape = RoundedCornerShape(16.dp),
-        ) {
-            if (ui.reading) {
-                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-            } else {
-                Icon(Icons.Rounded.Sync, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Читать данные")
-            }
-        }
+        MetricsSection("Двигатель", listOf(ObdPid.ENGINE_LOAD, ObdPid.TIMING, ObdPid.SPEED), metrics)
+        MetricsSection(
+            "Впуск / Топливо",
+            listOf(ObdPid.THROTTLE, ObdPid.MAF, ObdPid.MAP, ObdPid.INTAKE_TEMP, ObdPid.STFT, ObdPid.FUEL_LEVEL),
+            metrics,
+        )
+        MetricsSection("Электрика", listOf(ObdPid.VOLTAGE), metrics)
         OutlinedButton(
             onClick = onDisconnect,
             modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -289,20 +309,119 @@ private fun Dashboard(ui: UiState, onRead: () -> Unit, onDisconnect: () -> Unit)
 }
 
 @Composable
-private fun MetricCard(modifier: Modifier, icon: ImageVector, label: String, value: String, unit: String) {
-    ElevatedCard(modifier = modifier, shape = RoundedCornerShape(24.dp)) {
-        Column(Modifier.padding(20.dp)) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(12.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(value, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.width(4.dp))
-                Text(unit, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp))
+private fun MetricsSection(title: String, pids: List<ObdPid>, metrics: Map<ObdPid, Double>) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            title.uppercase(),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        pids.chunked(2).forEach { rowPids ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                rowPids.forEach { pid -> MetricCard(pid, metrics[pid], Modifier.weight(1f)) }
+                if (rowPids.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
 }
+
+@Composable
+private fun MetricCard(pid: ObdPid, value: Double?, modifier: Modifier) {
+    val cs = MaterialTheme.colorScheme
+    val status = metricStatus(pid, value)
+    val accent = when (status) {
+        MetricStatus.WARNING -> cs.tertiary
+        MetricStatus.CRITICAL -> cs.error
+        MetricStatus.NORMAL -> cs.primary
+    }
+    ElevatedCard(modifier = modifier.heightIn(min = 96.dp), shape = RoundedCornerShape(20.dp)) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(metricIcon(pid), null, Modifier.size(20.dp), tint = accent)
+                Spacer(Modifier.width(8.dp))
+                Text(pid.label, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant, maxLines = 1)
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    value?.let { formatMetric(it) } ?: "—",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (status == MetricStatus.NORMAL) cs.onSurface else accent,
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(pid.unit, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(bottom = 3.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CircularGauge(
+    value: Double?,
+    maxValue: Float,
+    warnAt: Float,
+    label: String,
+    unit: String,
+    modifier: Modifier,
+) {
+    val cs = MaterialTheme.colorScheme
+    val target = (value ?: 0.0).toFloat().coerceIn(0f, maxValue)
+    val animated by animateFloatAsState(target, tween(600, easing = FastOutSlowInEasing), label = "gauge_$label")
+    val fraction = (animated / maxValue).coerceIn(0f, 1f)
+    val warning = animated >= warnAt
+    val arcColor = if (warning) cs.error else cs.primary
+    val trackColor = cs.surfaceVariant.copy(alpha = 0.4f)
+    ElevatedCard(modifier, shape = RoundedCornerShape(24.dp)) {
+        Box(
+            Modifier.padding(16.dp).fillMaxWidth().aspectRatio(1f),
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(Modifier.fillMaxSize().padding(7.dp)) {
+                val stroke = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Round)
+                drawArc(trackColor, 135f, 270f, useCenter = false, style = stroke)
+                drawArc(arcColor, 135f, 270f * fraction, useCenter = false, style = stroke)
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    value?.let { formatMetric(it) } ?: "—",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (warning) cs.error else cs.onSurface,
+                )
+                Text(unit, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                Text(label, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+private fun metricStatus(pid: ObdPid, v: Double?): MetricStatus {
+    if (v == null) return MetricStatus.NORMAL
+    return when (pid) {
+        ObdPid.COOLANT -> if (v >= 110) MetricStatus.CRITICAL else if (v >= 105) MetricStatus.WARNING else MetricStatus.NORMAL
+        ObdPid.RPM -> if (v >= 6000) MetricStatus.WARNING else MetricStatus.NORMAL
+        ObdPid.VOLTAGE -> if (v < 12.0 || v > 15.0) MetricStatus.WARNING else MetricStatus.NORMAL
+        else -> MetricStatus.NORMAL
+    }
+}
+
+private fun metricIcon(pid: ObdPid): ImageVector = when (pid) {
+    ObdPid.RPM, ObdPid.SPEED -> Icons.Rounded.Speed
+    ObdPid.COOLANT -> Icons.Rounded.Thermostat
+    ObdPid.INTAKE_TEMP -> Icons.Rounded.DeviceThermostat
+    ObdPid.ENGINE_LOAD -> Icons.Rounded.DataUsage
+    ObdPid.MAF -> Icons.Rounded.Air
+    ObdPid.MAP -> Icons.Rounded.Compress
+    ObdPid.THROTTLE -> Icons.Rounded.Tune
+    ObdPid.STFT, ObdPid.FUEL_LEVEL -> Icons.Rounded.LocalGasStation
+    ObdPid.TIMING -> Icons.Rounded.Timer
+    ObdPid.VOLTAGE -> Icons.Rounded.Bolt
+}
+
+private fun formatMetric(v: Double): String =
+    if (v == v.toLong().toDouble()) v.toLong().toString() else "%.1f".format(v)
 
 @Composable
 private fun ConnectingCard() {
@@ -344,14 +463,14 @@ private fun ErrorCard(message: String) {
 // ---------- Вкладка «Диагностика» (чат с LLM) ----------
 
 @Composable
-private fun ChatTab(ui: UiState, onSend: (String) -> Unit, onClear: () -> Unit) {
+private fun ChatTab(ui: UiState, onSend: (String, List<LlmImage>) -> Unit, onClear: () -> Unit) {
     Column(Modifier.fillMaxSize().imePadding()) {
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (ui.chat.isEmpty()) {
-                item { EmptyChatHint { onSend(QUICK_DIAGNOSE_PROMPT) } }
+                item { EmptyChatHint { onSend(QUICK_DIAGNOSE_PROMPT, emptyList()) } }
             }
             items(ui.chat) { msg -> ChatBubble(msg) }
             if (ui.diagnosing) {
@@ -364,7 +483,13 @@ private fun ChatTab(ui: UiState, onSend: (String) -> Unit, onClear: () -> Unit) 
                 }
             }
         }
-        ChatInput(enabled = !ui.diagnosing, onSend = onSend, onClear = onClear, hasChat = ui.chat.isNotEmpty())
+        ChatInput(
+            enabled = !ui.diagnosing,
+            visionEnabled = isVisionModel(ui.provider, ui.model),
+            onSend = onSend,
+            onClear = onClear,
+            hasChat = ui.chat.isNotEmpty(),
+        )
     }
 }
 
@@ -394,13 +519,31 @@ private fun EmptyChatHint(onDiagnose: () -> Unit) {
 @Composable
 private fun ChatBubble(msg: ChatMessage) {
     val cs = MaterialTheme.colorScheme
+
+    // Служебный статус инструмента — компактная строка, как «думаю…» у агента.
+    if (msg.role == ChatRole.TOOL) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, top = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.Sync, null, Modifier.size(16.dp), tint = cs.onSurfaceVariant)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                msg.text,
+                style = MaterialTheme.typography.bodySmall,
+                fontStyle = FontStyle.Italic,
+                color = cs.onSurfaceVariant,
+            )
+        }
+        return
+    }
+
     val bg: Color
     val fg: Color
     when (msg.role) {
         ChatRole.USER -> { bg = cs.primary; fg = cs.onPrimary }
-        ChatRole.ASSISTANT -> { bg = cs.surfaceVariant; fg = cs.onSurfaceVariant }
-        ChatRole.TOOL -> { bg = cs.tertiaryContainer; fg = cs.onTertiaryContainer }
         ChatRole.SYSTEM -> { bg = cs.errorContainer; fg = cs.onErrorContainer }
+        else -> { bg = cs.surfaceVariant; fg = cs.onSurfaceVariant } // ASSISTANT
     }
     val alignment = if (msg.role == ChatRole.USER) Alignment.End else Alignment.Start
     Column(Modifier.fillMaxWidth()) {
@@ -409,38 +552,84 @@ private fun ChatBubble(msg: ChatMessage) {
             shape = RoundedCornerShape(16.dp),
             color = bg,
         ) {
-            Text(msg.text, Modifier.padding(14.dp), color = fg, style = MaterialTheme.typography.bodyMedium)
+            if (msg.role == ChatRole.ASSISTANT) {
+                // Markdown-ответ модели (жирный, списки, таблицы, код) рендерится, а не сырой текст.
+                Markdown(content = msg.text, modifier = Modifier.padding(14.dp))
+            } else {
+                Text(msg.text, Modifier.padding(14.dp), color = fg, style = MaterialTheme.typography.bodyMedium)
+            }
         }
     }
 }
 
 @Composable
-private fun ChatInput(enabled: Boolean, onSend: (String) -> Unit, onClear: () -> Unit, hasChat: Boolean) {
+private fun ChatInput(
+    enabled: Boolean,
+    visionEnabled: Boolean,
+    onSend: (String, List<LlmImage>) -> Unit,
+    onClear: () -> Unit,
+    hasChat: Boolean,
+) {
     var text by remember { mutableStateOf("") }
+    var image by remember { mutableStateOf<LlmImage?>(null) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch { image = ImageEncoder.encode(context, uri) }
+    }
+
     Surface(tonalElevation = 3.dp) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (hasChat) {
-                IconButton(onClick = onClear) {
-                    Icon(Icons.Rounded.DeleteSweep, "Очистить чат", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+            if (image != null) {
+                Row(
+                    modifier = Modifier.padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.Image, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Фото прикреплено",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { image = null }) {
+                        Icon(Icons.Rounded.Close, "Убрать фото", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Опишите проблему…") },
-                maxLines = 4,
-                shape = RoundedCornerShape(24.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            FilledIconButton(
-                onClick = { if (text.isNotBlank()) { onSend(text); text = "" } },
-                enabled = enabled && text.isNotBlank(),
-            ) {
-                Icon(Icons.AutoMirrored.Rounded.Send, "Отправить")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (hasChat) {
+                    IconButton(onClick = onClear) {
+                        Icon(Icons.Rounded.DeleteSweep, "Очистить чат", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (visionEnabled) {
+                    IconButton(onClick = {
+                        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }) {
+                        Icon(Icons.Rounded.AddPhotoAlternate, "Прикрепить фото", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Опишите проблему…") },
+                    maxLines = 4,
+                    shape = RoundedCornerShape(24.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                FilledIconButton(
+                    onClick = {
+                        onSend(text, image?.let { listOf(it) } ?: emptyList())
+                        text = ""
+                        image = null
+                    },
+                    enabled = enabled && (text.isNotBlank() || image != null),
+                ) {
+                    Icon(Icons.AutoMirrored.Rounded.Send, "Отправить")
+                }
             }
         }
     }
@@ -450,7 +639,7 @@ private fun ChatInput(enabled: Boolean, onSend: (String) -> Unit, onClear: () ->
 
 @Composable
 private fun SettingsTab(ui: UiState, vm: MainViewModel) {
-    var keyText by remember(ui.provider) { mutableStateOf("") }
+    var keyText by remember(ui.provider, ui.apiKey) { mutableStateOf(ui.apiKey) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -550,6 +739,11 @@ private fun ModelDropdown(models: List<LlmModel>, selected: String, onSelect: (S
         }
     }
 }
+
+/** Показывать ли кнопку прикрепления фото — Claude всегда vision, Cloud.ru — по имени модели. */
+private fun isVisionModel(provider: ProviderId, model: String): Boolean =
+    provider == ProviderId.CLAUDE ||
+        Regex("(?i)(vl|vision|4v|4\\.5v|gpt-4o|gpt-4\\.1|gpt-5|gemini|omni)").containsMatchIn(model)
 
 private const val QUICK_DIAGNOSE_PROMPT =
     "Проведи диагностику автомобиля: прочитай активные коды неисправностей и текущие " +
