@@ -1,16 +1,24 @@
 package ru.ngscanner.obd
 
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import ru.ngscanner.transport.ObdTransport
 
 /**
  * Драйвер ELM327 поверх произвольного [ObdTransport].
  * Инициализация адаптера и отправка OBD-II запросов.
+ *
+ * ELM327 — half-duplex: один запрос-ответ за раз. Все обращения к транспорту
+ * сериализованы [mutex], иначе кадры двух параллельных команд (опрос приборов
+ * и инструменты агента) смешиваются и парсер получает мусор.
  */
 class Elm327(private val transport: ObdTransport) {
 
+    private val mutex = Mutex()
+
     /** Последовательность инициализации адаптера перед работой. */
-    suspend fun initialize() {
+    suspend fun initialize() = mutex.withLock {
         for (cmd in INIT_SEQUENCE) {
             transport.write(cmd)
             transport.readResponse()
@@ -19,9 +27,9 @@ class Elm327(private val transport: ObdTransport) {
     }
 
     /** Отправить сырую команду (AT или PID) и вернуть ответ адаптера. */
-    suspend fun command(raw: String): String {
+    suspend fun command(raw: String): String = mutex.withLock {
         transport.write(raw)
-        return transport.readResponse()
+        transport.readResponse()
     }
 
     /** Прочитать и декодировать параметр Mode 01; `null`, если ответ не распознан. */

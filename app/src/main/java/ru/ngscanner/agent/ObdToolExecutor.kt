@@ -18,8 +18,9 @@ import ru.ngscanner.obd.ObdPid
  */
 class ObdToolExecutor(
     private val elm: Elm327?,
-    private val allowClearDtcs: () -> Boolean = { false },
+    private val allowClearDtcs: suspend () -> Boolean = { false },
     private val saveNote: (String) -> Boolean = { false },
+    private val describeDtc: suspend (String) -> String? = { null },
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -59,7 +60,11 @@ class ObdToolExecutor(
     private suspend fun runTool(elm: Elm327, call: ToolCall): String = when (call.name) {
         "get_connection_status" ->
             "Соединение активно. Протокол: ${elm.command("ATDP").ifBlank { "неизвестен" }}"
-        "read_vehicle_info" -> "Ответ VIN (0902): ${elm.command("0902")}"
+        "read_vehicle_info" -> {
+            val raw = elm.command("0902")
+            ObdParser.parseVin(raw)?.let { "VIN автомобиля: $it" }
+                ?: "Не удалось прочитать VIN (ответ адаптера: ${raw.trim()})."
+        }
         "list_supported_pids" -> "Поддерживаемые PID (0100): ${elm.command("0100")}"
         "read_dtcs" -> formatDtcs("Активные коды неисправностей", elm.command("03"))
         "read_pending_dtcs" -> formatDtcs("Неподтверждённые коды", elm.command("07"))
@@ -76,10 +81,27 @@ class ObdToolExecutor(
         else -> "Неизвестный инструмент: ${call.name}"
     }
 
-    private fun formatDtcs(title: String, raw: String): String {
-        val codes = ObdParser.parseDtcs(raw)
-        return if (codes.isEmpty()) "$title: не обнаружены." else "$title: ${codes.joinToString(", ")}"
-    }
+    private suspend fun formatDtcs(title: String, raw: String): String =
+        when (val result = ObdParser.parseDtcs(raw)) {
+            is ObdParser.DtcResult.Ok -> if (result.codes.isEmpty()) {
+                "$title: не обнаружены."
+            } else {
+                val sb = StringBuilder("$title:")
+                for (code in result.codes) {
+                    val desc = describeDtc(code)
+                    sb.append('\n').append(if (desc != null) "• $code — $desc" else "• $code")
+                }
+                sb.toString()
+            }
+            ObdParser.DtcResult.NoData ->
+                "$title: ЭБУ вернул NO DATA. Возможно, кодов нет или режим не поддерживается — " +
+                    "это НЕ гарантия исправности."
+            ObdParser.DtcResult.BusError ->
+                "$title: НЕТ СВЯЗИ С ЭБУ (ошибка шины). Это не значит «исправно» — проверь " +
+                    "зажигание и разъём OBD, затем повтори. Не делай вывод об отсутствии неисправностей."
+            is ObdParser.DtcResult.Unknown ->
+                "$title: непонятный ответ адаптера: ${result.raw}"
+        }
 
     private suspend fun readLiveData(elm: Elm327, argsJson: String): String {
         val pids = runCatching {
