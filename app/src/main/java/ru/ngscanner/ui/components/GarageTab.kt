@@ -2,6 +2,7 @@
 
 package ru.ngscanner.ui.components
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -83,6 +84,17 @@ private sealed interface GarageNav {
 @Composable
 internal fun GarageTab(ui: UiState, vm: MainViewModel) {
     var nav by remember { mutableStateOf<GarageNav>(GarageNav.List) }
+    // «Назад» на вложенных экранах Гаража возвращает на шаг назад, а не выходит из
+    // приложения. На корневом списке обработчик выключен — тогда «назад» ловит
+    // MainScreen и уводит на вкладку «Приборы».
+    BackHandler(enabled = nav !is GarageNav.List) {
+        nav = when (nav) {
+            is GarageNav.AddForm -> GarageNav.AddSearch
+            is GarageNav.AddSearch -> { vm.clearSuggestions(); GarageNav.List }
+            is GarageNav.AddVin -> { vm.clearVin(); GarageNav.List }
+            else -> GarageNav.List
+        }
+    }
     when (val n = nav) {
         is GarageNav.List -> CarListScreen(
             garage = ui.garage,

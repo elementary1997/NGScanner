@@ -4,6 +4,7 @@ package ru.ngscanner.ui
 
 import android.Manifest
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.launch
@@ -104,6 +105,11 @@ fun MainScreen(vm: MainViewModel) {
             }
         },
     ) { padding ->
+        // «Назад» с любой вкладки, кроме «Приборы», возвращает на «Приборы», а не
+        // закрывает приложение. Внутренняя навигация экранов (например, Гараж)
+        // перехватывает «назад» раньше — её BackHandler объявлен ниже по дереву
+        // и потому имеет приоритет над этим.
+        BackHandler(enabled = tab != Tab.Devices) { tab = Tab.Devices }
         // consumeWindowInsets сообщает вложенным элементам, что нижний отступ (навбар)
         // уже применён Scaffold — тогда imePadding у панели ввода не удваивает его.
         Box(
@@ -127,6 +133,7 @@ fun MainScreen(vm: MainViewModel) {
                     onClear = vm::clearChat,
                     onCancel = vm::cancelDiagnosis,
                     onLocalDiagnose = vm::localDiagnose,
+                    onRestore = vm::restoreSession,
                 )
                 Tab.Garage -> GarageTab(ui, vm)
                 Tab.Settings -> SettingsTab(ui, vm)

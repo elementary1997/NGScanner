@@ -45,6 +45,7 @@ import ru.ngscanner.obd.ObdPid
 import ru.ngscanner.service.ObdForegroundService
 import ru.ngscanner.settings.AppSettings
 import ru.ngscanner.settings.ChatRepository
+import ru.ngscanner.settings.SessionSummary
 import ru.ngscanner.transport.ClassicSppTransport
 
 enum class ConnectionState { Disconnected, Connecting, Connected }
@@ -77,6 +78,8 @@ data class UiState(
     // диагностика / чат с LLM
     val chat: List<ChatMessage> = emptyList(),
     val diagnosing: Boolean = false,
+    // архив последних сессий диагностики (для восстановления)
+    val sessions: List<SessionSummary> = emptyList(),
     // настройки провайдера
     val provider: ProviderId = ProviderId.CLAUDE,
     val model: String = AppSettings.DEFAULT_MODEL,
@@ -130,6 +133,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 garage = garage,
                 modelNorms = garage.activeCar?.let { c -> normsRepo.normsFor(c.id) } ?: emptyMap(),
                 chat = chatRepo.loadChat(),
+                sessions = chatRepo.sessions(),
             )
         },
     )
@@ -459,10 +463,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun errorMessage(ex: Throwable): String =
         (ex as? LlmException ?: LlmException.from(ex)).userMessage()
 
+    /** Начинает новый диалог: текущий (непустой) уходит в архив последних сессий. */
     fun clearChat() {
+        val summaries = chatRepo.archive(
+            _ui.value.chat,
+            llmHistory,
+            id = java.util.UUID.randomUUID().toString(),
+            dateIso = java.time.LocalDate.now().toString(),
+        )
         llmHistory = emptyList()
         chatRepo.clear()
-        _ui.update { it.copy(chat = emptyList()) }
+        _ui.update { it.copy(chat = emptyList(), sessions = summaries) }
+    }
+
+    /** Восстанавливает архивную сессию как активный диалог (убирая её из архива). */
+    fun restoreSession(id: String) {
+        if (_ui.value.diagnosing) return
+        val session = chatRepo.session(id) ?: return
+        // Текущий непустой диалог не теряем — сначала архивируем его.
+        if (_ui.value.chat.isNotEmpty()) {
+            chatRepo.archive(
+                _ui.value.chat,
+                llmHistory,
+                id = java.util.UUID.randomUUID().toString(),
+                dateIso = java.time.LocalDate.now().toString(),
+            )
+        }
+        val remaining = chatRepo.removeSession(id)
+        llmHistory = session.history
+        chatRepo.save(session.chat, session.history)
+        _ui.update { it.copy(chat = session.chat, sessions = remaining) }
     }
 
     private fun appendChat(message: ChatMessage) {

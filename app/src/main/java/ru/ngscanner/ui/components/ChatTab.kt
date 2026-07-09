@@ -37,9 +37,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.HealthAndSafety
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -66,6 +68,8 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mikepenz.markdown.m3.Markdown
+import ru.ngscanner.settings.SessionSummary
+import ru.ngscanner.ui.ConnectionState
 import ru.ngscanner.ui.UiState
 import ru.ngscanner.ui.ChatMessage
 import ru.ngscanner.ui.ChatRole
@@ -77,6 +81,7 @@ internal fun ChatTab(
     onClear: () -> Unit,
     onCancel: () -> Unit,
     onLocalDiagnose: () -> Unit,
+    onRestore: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -92,7 +97,15 @@ internal fun ChatTab(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (ui.chat.isEmpty()) {
-                item { EmptyChatHint(onSend = { onSend(it, emptyList()) }, onLocalDiagnose = onLocalDiagnose) }
+                item {
+                    EmptyChatHint(
+                        onSend = { onSend(it, emptyList()) },
+                        onLocalDiagnose = onLocalDiagnose,
+                        adapterConnected = ui.connection == ConnectionState.Connected,
+                        sessions = ui.sessions,
+                        onRestore = onRestore,
+                    )
+                }
             }
             items(ui.chat) { msg -> ChatBubble(msg) }
             if (ui.diagnosing) {
@@ -149,7 +162,13 @@ private val SYMPTOMS = listOf(
 )
 
 @Composable
-private fun EmptyChatHint(onSend: (String) -> Unit, onLocalDiagnose: () -> Unit) {
+private fun EmptyChatHint(
+    onSend: (String) -> Unit,
+    onLocalDiagnose: () -> Unit,
+    adapterConnected: Boolean,
+    sessions: List<SessionSummary>,
+    onRestore: (String) -> Unit,
+) {
     val cs = MaterialTheme.colorScheme
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 36.dp, start = 8.dp, end = 8.dp),
@@ -178,11 +197,31 @@ private fun EmptyChatHint(onSend: (String) -> Unit, onLocalDiagnose: () -> Unit)
             Spacer(Modifier.width(8.dp))
             Text("Быстрая диагностика")
         }
-        OutlinedButton(onClick = onLocalDiagnose, shape = RoundedCornerShape(16.dp)) {
+        // Офлайн-диагностика читает коды с ЭБУ — без адаптера ей неоткуда брать данные.
+        OutlinedButton(
+            onClick = onLocalDiagnose,
+            enabled = adapterConnected,
+            shape = RoundedCornerShape(16.dp),
+        ) {
             Icon(Icons.Rounded.CloudOff, null, Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text("Без интернета — по кодам")
         }
+        if (!adapterConnected) {
+            Text(
+                "Диагностика по кодам требует подключённого адаптера — коды читаются с ЭБУ " +
+                    "автомобиля. Подключите ELM327 на вкладке «Приборы».",
+                style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+
+        if (sessions.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            SessionsBlock(sessions, onRestore)
+        }
+
         Spacer(Modifier.height(4.dp))
         Text(
             "Диагностика охватывает двигатель и систему выпуска (generic OBD-II). ABS, подушки " +
@@ -191,6 +230,54 @@ private fun EmptyChatHint(onSend: (String) -> Unit, onLocalDiagnose: () -> Unit)
             color = cs.onSurfaceVariant.copy(alpha = 0.7f),
             textAlign = TextAlign.Center,
         )
+    }
+}
+
+/** Список последних сессий диагностики: тап восстанавливает диалог. */
+@Composable
+private fun SessionsBlock(sessions: List<SessionSummary>, onRestore: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.History, null, Modifier.size(18.dp), tint = cs.onSurfaceVariant)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Последние сессии",
+                style = MaterialTheme.typography.labelLarge,
+                color = cs.onSurfaceVariant,
+            )
+        }
+        sessions.forEach { s ->
+            Surface(
+                onClick = { onRestore(s.id) },
+                shape = RoundedCornerShape(14.dp),
+                color = cs.surfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            s.title,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                        )
+                        Text(
+                            "${s.dateIso} · ${s.count} сообщ.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cs.onSurfaceVariant,
+                        )
+                    }
+                    Icon(Icons.Rounded.ChevronRight, null, tint = cs.onSurfaceVariant)
+                }
+            }
+        }
     }
 }
 
