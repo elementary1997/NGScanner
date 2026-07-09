@@ -31,10 +31,15 @@ object VinDecoder {
     suspend fun decode(vin: String): VinInfo? = withContext(Dispatchers.IO) {
         val clean = vin.trim().uppercase()
         if (clean.length !in 11..17) return@withContext null
-        // Сначала онлайн-сервис (полные данные для иномарок).
+        // Регион VIN «X» — Россия/СНГ. Такие авто американский сервис почти не знает,
+        // поэтому определяем марку офлайн по WMI и не обращаемся за границу.
+        if (clean.startsWith("X")) {
+            wmiMake(clean)?.let { return@withContext VinInfo(it, model = "", year = yearFromVin(clean)) }
+        }
+        // Иномарки — онлайн-сервис (полные данные: марка, модель, год).
         val online = runCatching { decodeOnline(clean) }.getOrNull()
         if (online != null) return@withContext online
-        // Офлайн-резерв: марка по WMI + год из VIN. Покрывает авто рынка РФ и работу без сети.
+        // Резерв по WMI (в т.ч. если сети нет).
         val make = wmiMake(clean) ?: return@withContext null
         VinInfo(make = make, model = "", year = yearFromVin(clean))
     }
@@ -89,6 +94,12 @@ object VinDecoder {
         "JTD" to "Toyota", "JT1" to "Toyota", "JT2" to "Toyota", "JF1" to "Subaru",
         "KMH" to "Hyundai", "KNA" to "Kia", "KNB" to "Kia", "KL1" to "Chevrolet",
         "SAL" to "Land Rover", "SAJ" to "Jaguar", "YV1" to "Volvo", "YS3" to "Saab",
+        // Китайские марки (активно продаются в РФ)
+        "LVT" to "Chery", "LVV" to "Chery", "LVS" to "Chery",
+        "L6T" to "Geely", "LB3" to "Geely", "LB2" to "Geely",
+        "LGW" to "Haval", "LGX" to "BYD", "LC0" to "BYD",
+        "LS5" to "Changan", "LS4" to "Changan", "LJ1" to "JAC",
+        "LFV" to "FAW", "LMG" to "GAC", "LFP" to "Lifan",
     )
 
     /** Год модели по 10-й позиции VIN (резерв, если сервис не вернул ModelYear). */
