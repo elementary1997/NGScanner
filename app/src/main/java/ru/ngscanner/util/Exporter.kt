@@ -9,8 +9,11 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import ru.ngscanner.obd.ObdPid
+import ru.ngscanner.trips.Trip
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
 
 /**
  * Экспорт ответа агента: копирование делается на месте, а этот объект собирает
@@ -28,6 +31,45 @@ object Exporter {
             putExtra(Intent.EXTRA_TEXT, text)
         }
         context.startActivity(Intent.createChooser(intent, "Поделиться ответом"))
+    }
+
+    /**
+     * Собирает CSV записанной поездки/события: строка — синхронный снимок, колонки —
+     * время (с от начала) и значения параметров. Разделитель `;` и точка в числах —
+     * открывается и в Excel, и в Google Sheets. Тяжёлую запись вызывать не на Main.
+     */
+    fun buildTripCsv(context: Context, trip: Trip): Uri {
+        val dir = File(context.cacheDir, "shared").apply { mkdirs() }
+        val file = File(dir, "trip_${trip.id}.csv")
+        // Заголовки — человекочитаемые метки с единицами; ключ данных — имя PID.
+        val cols = trip.pids.map { name ->
+            val pid = runCatching { ObdPid.valueOf(name) }.getOrNull()
+            name to (pid?.let { "${it.label}, ${it.unit}" } ?: name)
+        }
+        val sb = StringBuilder()
+        sb.append("Время, с;").append(cols.joinToString(";") { it.second }).append('\n')
+        for (s in trip.samples) {
+            sb.append(String.format(Locale.US, "%.1f", (s.t - trip.startMs) / 1000.0))
+            for ((name, _) in cols) {
+                sb.append(';')
+                s.v[name]?.let { sb.append(String.format(Locale.US, "%.2f", it)) }
+            }
+            sb.append('\n')
+        }
+        file.writeText(sb.toString())
+        return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }
+
+    /** Открывает «Поделиться» для готового CSV. */
+    fun shareCsv(context: Context, uri: Uri) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(intent, "Экспорт поездки (CSV)")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
     }
 
     /** Открывает «Поделиться/сохранить» для готового PDF (startActivity — с главного потока). */

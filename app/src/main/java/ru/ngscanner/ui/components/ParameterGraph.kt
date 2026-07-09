@@ -80,6 +80,7 @@ internal fun ParameterGraphScreen(
     loading: Boolean,
     onRequestNorm: (ObdPid) -> Unit,
     activeCarTitle: String?,
+    initialOverlay: Set<String> = emptySet(),
 ) {
     val cs = MaterialTheme.colorScheme
     val samples = history[pid].orEmpty()
@@ -91,7 +92,8 @@ internal fun ParameterGraphScreen(
         history.filter { it.key != pid && it.value.size >= 2 }.keys.sortedBy { it.ordinal }
     }
     // Транзиентный выбор наложенных серий (Set не сохраняется в Bundle — только remember).
-    var selected by remember { mutableStateOf(setOf<String>()) }
+    // Для комбо-графика приходит предвыбранный набор параметров.
+    var selected by remember { mutableStateOf(initialOverlay) }
     val overlays = available
         .filter { it.name in selected }
         .map { OverlaySeries(it, history[it].orEmpty(), OVERLAY_COLORS[available.indexOf(it) % OVERLAY_COLORS.size]) }

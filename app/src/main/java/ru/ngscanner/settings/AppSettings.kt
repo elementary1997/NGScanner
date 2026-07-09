@@ -51,6 +51,12 @@ class AppSettings(context: Context) {
         get() = runCatching { prefs.getString(KEY_MODEL, DEFAULT_MODEL) }.getOrNull() ?: DEFAULT_MODEL
         set(value) { runCatching { prefs.edit().putString(KEY_MODEL, value).apply() } }
 
+    /** Выбранные пользователем PID для панели графиков (пустой список = показывать все). */
+    var graphPids: List<String>
+        get() = runCatching { prefs.getString(KEY_GRAPH_PIDS, "") }.getOrNull()
+            ?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+        set(value) { runCatching { prefs.edit().putString(KEY_GRAPH_PIDS, value.joinToString(",")).apply() } }
+
     fun apiKey(p: ProviderId): String =
         runCatching { prefs.getString(keyFor(p), "") }.getOrNull().orEmpty()
 
@@ -105,6 +111,7 @@ class AppSettings(context: Context) {
         private const val PREFS_FALLBACK = "ngscanner_settings"
         private const val KEY_PROVIDER = "provider"
         private const val KEY_MODEL = "model"
+        private const val KEY_GRAPH_PIDS = "graph_pids"
         const val DEFAULT_MODEL = "claude-opus-4-8"
     }
 }

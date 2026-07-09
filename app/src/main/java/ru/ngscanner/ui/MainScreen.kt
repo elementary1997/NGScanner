@@ -148,6 +148,11 @@ fun MainScreen(vm: MainViewModel) {
                         onDisconnect = vm::disconnect,
                         onRequestNorm = vm::requestNorm,
                         onOpenConnection = { goToTab(Tab.Settings) },
+                        onSetGraphPids = vm::setGraphPids,
+                        onRefreshTrips = vm::refreshTrips,
+                        onDeleteTrip = vm::deleteTrip,
+                        onExportTrip = vm::exportTripCsv,
+                        loadTrip = vm::loadTrip,
                     )
                     Tab.Chat -> ChatTab(
                         ui,

@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import ru.ngscanner.obd.ObdPid
+import ru.ngscanner.trips.Trip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.BluetoothSearching
 import androidx.compose.material.icons.rounded.Bluetooth
@@ -35,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -61,9 +63,18 @@ internal fun DevicesTab(
     onDisconnect: () -> Unit,
     onRequestNorm: (ObdPid) -> Unit,
     onOpenConnection: () -> Unit,
+    onSetGraphPids: (List<String>) -> Unit,
+    onRefreshTrips: () -> Unit,
+    onDeleteTrip: (String) -> Unit,
+    onExportTrip: (String) -> Unit,
+    loadTrip: suspend (String) -> Trip?,
 ) {
     // Имя открытого параметра (String сохраняется в Bundle → график переживает поворот).
     var graphName by rememberSaveable { mutableStateOf<String?>(null) }
+    // Наложенные серии для комбо-графика (Set не сохраняется в Bundle — только remember).
+    var graphOverlays by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // Открыт ли экран записей (доступен и без соединения — просмотр сохранённого).
+    var showTrips by rememberSaveable { mutableStateOf(false) }
     // При обрыве связи закрываем график, иначе при авто-реконнекте early-return
     // прыгнул бы сразу в него, минуя дашборд.
     LaunchedEffect(ui.connection) {
@@ -83,13 +94,36 @@ internal fun DevicesTab(
             loading = ui.normLoadingPid == graph.cmd,
             onRequestNorm = onRequestNorm,
             activeCarTitle = ui.garage.activeCar?.title,
+            initialOverlay = graphOverlays,
+        )
+        return
+    }
+    // Экран «Поездки и события» заменяет вкладку целиком (работает и офлайн).
+    if (showTrips) {
+        LaunchedEffect(Unit) { onRefreshTrips() }
+        TripsScreen(
+            metas = ui.tripMetas,
+            onBack = { showTrips = false },
+            onDelete = onDeleteTrip,
+            onExport = onExportTrip,
+            loadTrip = loadTrip,
         )
         return
     }
     // При активном соединении — приборы и графики на двух свайпаемых панелях; иначе
     // (нет данных для графиков) прежний одиночный экран со статусом и избранными.
     if (ui.connection == ConnectionState.Connected) {
-        DevicesConnected(ui, onDisconnect, onOpenGraph = { graphName = it.name })
+        DevicesConnected(
+            ui = ui,
+            onDisconnect = onDisconnect,
+            onOpenGraph = { graphName = it.name; graphOverlays = emptySet() },
+            onOpenCombo = { pids ->
+                graphName = pids.first().name
+                graphOverlays = pids.drop(1).map { it.name }.toSet()
+            },
+            onSetGraphPids = onSetGraphPids,
+            onOpenTrips = { showTrips = true },
+        )
     } else {
         Column(
             modifier = Modifier
@@ -120,6 +154,9 @@ private fun DevicesConnected(
     ui: UiState,
     onDisconnect: () -> Unit,
     onOpenGraph: (ObdPid) -> Unit,
+    onOpenCombo: (List<ObdPid>) -> Unit,
+    onSetGraphPids: (List<String>) -> Unit,
+    onOpenTrips: () -> Unit,
 ) {
     val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
@@ -144,7 +181,16 @@ private fun DevicesConnected(
                     Spacer(Modifier.height(16.dp))
                 }
             } else {
-                GraphsPanel(ui.metrics, ui.history, onOpenGraph)
+                GraphsPanel(
+                    metrics = ui.metrics,
+                    history = ui.history,
+                    graphPids = ui.graphPids,
+                    recording = ui.recording,
+                    onOpenGraph = onOpenGraph,
+                    onOpenCombo = onOpenCombo,
+                    onSetGraphPids = onSetGraphPids,
+                    onOpenTrips = onOpenTrips,
+                )
             }
         }
     }

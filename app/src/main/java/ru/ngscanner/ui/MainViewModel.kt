@@ -59,6 +59,11 @@ import ru.ngscanner.settings.ModelUsage
 import ru.ngscanner.settings.SessionSummary
 import ru.ngscanner.settings.UsageRepository
 import ru.ngscanner.transport.ClassicSppTransport
+import ru.ngscanner.trips.Trip
+import ru.ngscanner.trips.TripKind
+import ru.ngscanner.trips.TripMeta
+import ru.ngscanner.trips.TripRepository
+import ru.ngscanner.trips.TripSample
 import ru.ngscanner.util.Exporter
 
 enum class ConnectionState { Disconnected, Connecting, Connected }
@@ -92,6 +97,11 @@ data class UiState(
     val metrics: Map<ObdPid, Double> = emptyMap(),
     // история значений с временными метками для графиков (последние точки на параметр)
     val history: Map<ObdPid, List<MetricSample>> = emptyMap(),
+    // запись поездки: идёт ли, сохранённые поездки/события, выбор параметров панели графиков
+    val recording: Boolean = false,
+    val tripMetas: List<TripMeta> = emptyList(),
+    // выбранные для панели графиков PID (пусто = показывать все с историей)
+    val graphPids: List<String> = emptyList(),
     val error: String? = null,
     // диагностика / чат с LLM
     val chat: List<ChatMessage> = emptyList(),
@@ -145,6 +155,8 @@ private class LoadedState(
     val modelUsage: List<ModelUsage>,
     val modelPrices: Map<String, ModelPrice>,
     val history: List<LlmMessage>,
+    val graphPids: List<String>,
+    val tripMetas: List<TripMeta>,
 )
 
 /**
@@ -162,6 +174,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val chatRepo = ChatRepository(app)
     private val favoritesRepo = FavoritesRepository(app)
     private val usageRepo = UsageRepository(app)
+    private val tripRepo = TripRepository(app)
+
+    // Запись поездки: буфер синхронных снимков и её старт; чёрный ящик — детект
+    // перехода параметров в критическую зону для сохранения окна вокруг события.
+    private val tripBuffer = ArrayList<TripSample>()
+    private var tripStartMs = 0L
+    private val recordedPids = LinkedHashSet<String>()
+    private var prevCritical = emptySet<ObdPid>()
 
     private var transport: ClassicSppTransport? = null
     private var elm: Elm327? = null
@@ -200,6 +220,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     modelUsage = usageRepo.models(provider),
                     modelPrices = usageRepo.prices(),
                     history = chatRepo.loadHistory(),
+                    graphPids = settings.graphPids,
+                    tripMetas = tripRepo.metas(),
                 )
             }
             if (llmHistory.isEmpty()) llmHistory = loaded.history
@@ -228,6 +250,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     sessions = if (cur.sessions == empty.sessions) loaded.sessions else cur.sessions,
                     keysEncrypted = loaded.keysEncrypted, // не редактируется пользователем
                     favorites = if (cur.favorites == empty.favorites) loaded.favorites else cur.favorites,
+                    graphPids = if (cur.graphPids == empty.graphPids) loaded.graphPids else cur.graphPids,
+                    tripMetas = if (cur.tripMetas == empty.tripMetas) loaded.tripMetas else cur.tripMetas,
                 )
             }
         }
@@ -312,6 +336,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.update {
                     it.copy(connection = ConnectionState.Connected, connectedName = device.name ?: address)
                 }
+                startTripRecording()
                 startPolling()
             } catch (ex: Exception) {
                 // Закрываем именно свежий сокет: если init упал уже после connect(),
@@ -350,6 +375,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         // не должен гасить остальные приборы в «—» до следующего цикла.
                         state.copy(metrics = state.metrics + values, history = history)
                     }
+                    recordTripSample(now, values)
+                    checkBlackBox(now, values)
                     emptyStreak = 0
                     lastDataAt = now
                 } else {
@@ -386,10 +413,127 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         pollJob = null
     }
 
+    // ---- Запись поездок и «чёрный ящик» ----
+
+    /** Начинает запись новой поездки (при подключении). Реконнект её не сбрасывает. */
+    private fun startTripRecording() {
+        tripBuffer.clear()
+        recordedPids.clear()
+        tripStartMs = System.currentTimeMillis()
+        prevCritical = emptySet()
+        _ui.update { it.copy(recording = true) }
+    }
+
+    /** Добавляет снимок в буфер поездки; при переполнении прореживает вдвое. */
+    private fun recordTripSample(now: Long, values: Map<ObdPid, Double>) {
+        if (!_ui.value.recording) return
+        values.keys.forEach { recordedPids.add(it.name) }
+        tripBuffer.add(TripSample(now, values.mapKeys { it.key.name }))
+        if (tripBuffer.size > MAX_TRIP_SAMPLES) {
+            val thinned = tripBuffer.filterIndexed { i, _ -> i % 2 == 0 }
+            tripBuffer.clear(); tripBuffer.addAll(thinned)
+        }
+    }
+
+    /** Сохраняет поездку при отключении, если она достаточно длинная. */
+    private fun finishTripRecording() {
+        if (!_ui.value.recording) return
+        val samples = ArrayList(tripBuffer)
+        val start = tripStartMs
+        val pids = recordedPids.toList()
+        val carTitle = _ui.value.garage.activeCar?.title
+        tripBuffer.clear()
+        recordedPids.clear()
+        _ui.update { it.copy(recording = false) }
+        if (samples.size < MIN_TRIP_SAMPLES) return // слишком короткая — не сохраняем
+        viewModelScope.launch {
+            val metas = withContext(Dispatchers.IO) {
+                tripRepo.save(
+                    Trip(
+                        id = TripRepository.newId(), kind = TripKind.TRIP,
+                        startMs = start, endMs = samples.last().t,
+                        carTitle = carTitle, pids = pids, samples = samples,
+                    ),
+                )
+            }
+            _ui.update { it.copy(tripMetas = metas) }
+        }
+    }
+
+    /** Детект перехода параметра в критическую зону → сохранение окна события. */
+    private fun checkBlackBox(now: Long, values: Map<ObdPid, Double>) {
+        val critical = values.filterKeys { true }.filter { (pid, v) -> isCritical(pid, v) }.keys
+        val fresh = critical - prevCritical // только переходы норма→критично
+        prevCritical = critical
+        fresh.forEach { pid -> scheduleEventSave(pid, now) }
+    }
+
+    private fun isCritical(pid: ObdPid, v: Double): Boolean =
+        (pid.critHigh != null && v >= pid.critHigh) || (pid.critLow != null && v <= pid.critLow)
+
+    /** Дособирает «хвост» после аномалии и вырезает окно [t−30с…t+30с] в событие. */
+    private fun scheduleEventSave(pid: ObdPid, triggerMs: Long) {
+        val carTitle = _ui.value.garage.activeCar?.title
+        viewModelScope.launch {
+            delay(EVENT_POST_MS)
+            val window = tripBuffer.filter { it.t in (triggerMs - EVENT_PRE_MS)..(triggerMs + EVENT_POST_MS) }
+            if (window.size < 3) return@launch
+            val metas = withContext(Dispatchers.IO) {
+                tripRepo.save(
+                    Trip(
+                        id = TripRepository.newId(), kind = TripKind.EVENT,
+                        startMs = window.first().t, endMs = window.last().t,
+                        carTitle = carTitle, trigger = "${pid.label} — критично",
+                        pids = recordedPids.toList(), samples = window,
+                    ),
+                )
+            }
+            _ui.update { it.copy(tripMetas = metas) }
+        }
+    }
+
+    /** Обновляет список записей (для экрана «Поездки и события»). */
+    fun refreshTrips() {
+        viewModelScope.launch {
+            val metas = withContext(Dispatchers.IO) { tripRepo.metas() }
+            _ui.update { it.copy(tripMetas = metas) }
+        }
+    }
+
+    fun deleteTrip(id: String) {
+        viewModelScope.launch {
+            val metas = withContext(Dispatchers.IO) { tripRepo.delete(id) }
+            _ui.update { it.copy(tripMetas = metas) }
+        }
+    }
+
+    /** Полная запись для просмотра графиков поездки. */
+    suspend fun loadTrip(id: String): Trip? = withContext(Dispatchers.IO) { tripRepo.load(id) }
+
+    /** Экспортирует запись в CSV и открывает системный «Поделиться». */
+    fun exportTripCsv(id: String) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val uri = withContext(Dispatchers.IO) {
+                val trip = tripRepo.load(id) ?: return@withContext null
+                runCatching { Exporter.buildTripCsv(app, trip) }.getOrElse { Log.w(TAG, "Экспорт CSV не удался", it); null }
+            }
+            if (uri != null) Exporter.shareCsv(app, uri)
+            else Toast.makeText(app, "Не удалось экспортировать поездку", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Настройка набора параметров для панели графиков (пустой список = показывать все). */
+    fun setGraphPids(pids: List<String>) {
+        settings.graphPids = pids
+        _ui.update { it.copy(graphPids = pids) }
+    }
+
     fun disconnect() {
         reconnecting = false
         lastAddress = null
         stopPolling()
+        finishTripRecording() // сохраняем поездку до сброса состояния
         transport?.close()
         transport = null
         elm = null
@@ -450,6 +594,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 delayMs = (delayMs * 2).coerceAtMost(RECONNECT_MAX_MS)
             }
             reconnecting = false
+            finishTripRecording() // связь потеряна окончательно — сохраняем накопленную поездку
             transport = null
             elm = null
             ObdForegroundService.stop(getApplication())
@@ -542,7 +687,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             appendChat(ChatMessage(ChatRole.SYSTEM, "Сначала подключите адаптер на вкладке «Приборы»."))
             return
         }
-        if (_ui.value.diagnosing) return
+        if (_ui.value.diagnosing || _ui.value.vinScanning) return // не пересекаемся со сканом VIN на half-duplex шине
         appendChat(ChatMessage(ChatRole.USER, "🔧 Локальная диагностика (без интернета)"))
         _ui.update { it.copy(diagnosing = true) }
         val wasPolling = pollJob?.isActive == true
@@ -772,15 +917,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Сохраняет собранную в форме машину и делает её активной. */
     fun addCar(car: Car) {
-        garageRepo.upsertCar(car)
-        val garage = garageRepo.setActive(car.id)
+        // Дедуп по VIN: повторный скан того же авто не должен плодить вторую пустую
+        // запись (иначе активной станет она, а бортжурнал/история осядут в первой).
+        val vin = car.vin?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+        val existing = vin?.let { v -> _ui.value.garage.cars.firstOrNull { it.vin?.trim()?.uppercase() == v } }
+        val toSave = if (existing != null) car.copy(id = existing.id, log = existing.log) else car
+        garageRepo.upsertCar(toSave)
+        val garage = garageRepo.setActive(toSave.id)
         _ui.update {
             it.copy(
                 garage = garage,
                 carSuggestions = emptyList(),
                 vinResult = null,
                 vinError = null,
-                modelNorms = normsRepo.normsFor(car.id),
+                modelNorms = normsRepo.normsFor(toSave.id),
             )
         }
     }
@@ -1018,5 +1168,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private const val HISTORY_SIZE = 240
         private const val MAX_HISTORY_MSGS = 40
         private const val SEARCH_DEBOUNCE_MS = 250L
+        // Запись поездок: потолок точек в памяти (при переполнении — прореживание),
+        // минимум для сохранения и окно «чёрного ящика» вокруг аномалии.
+        private const val MAX_TRIP_SAMPLES = 4000
+        private const val MIN_TRIP_SAMPLES = 10
+        private const val EVENT_PRE_MS = 30_000L
+        private const val EVENT_POST_MS = 30_000L
     }
 }
