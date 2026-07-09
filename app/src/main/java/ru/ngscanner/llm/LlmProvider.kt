@@ -1,5 +1,7 @@
 package ru.ngscanner.llm
 
+import kotlinx.serialization.Serializable
+
 /**
  * Абстракция LLM-провайдера.
  *
@@ -41,6 +43,7 @@ data class LlmRequest(
     val tools: List<ToolSpec>,
 )
 
+@Serializable
 data class LlmMessage(
     val role: Role,
     val content: String? = null,
@@ -50,8 +53,10 @@ data class LlmMessage(
 )
 
 /** Изображение для vision-моделей: base64 без префикса `data:` + MIME-тип. */
+@Serializable
 data class LlmImage(val base64: String, val mediaType: String = "image/jpeg")
 
+@Serializable
 enum class Role { USER, ASSISTANT, TOOL }
 
 /**
@@ -64,8 +69,10 @@ data class ToolSpec(
     val parametersJsonSchema: String,
 )
 
+@Serializable
 data class ToolCall(val id: String, val name: String, val argumentsJson: String)
 
+@Serializable
 data class ToolResult(val callId: String, val content: String, val isError: Boolean = false)
 
 /** Результат одного шага диалога с моделью. */

@@ -161,16 +161,18 @@ class CloudRuProvider(
         val content = message["content"]?.jsonPrimitive?.contentOrNull
         val toolCalls = message["tool_calls"]?.jsonArray
         if (!toolCalls.isNullOrEmpty()) {
-            val calls = toolCalls.map { tc ->
+            // Пропускаем нестандартные элементы, а не роняем весь агентный цикл на !!.
+            val calls = toolCalls.mapNotNull { tc ->
                 val o = tc.jsonObject
-                val fn = o["function"]!!.jsonObject
+                val fn = o["function"]?.jsonObject ?: return@mapNotNull null
+                val name = fn["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
                 ToolCall(
                     id = o["id"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                    name = fn["name"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                    name = name,
                     argumentsJson = fn["arguments"]?.jsonPrimitive?.contentOrNull ?: "{}",
                 )
             }
-            return LlmResponse.ToolUse(content, calls)
+            if (calls.isNotEmpty()) return LlmResponse.ToolUse(content, calls)
         }
         return LlmResponse.Final(content.orEmpty())
     }
