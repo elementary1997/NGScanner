@@ -57,7 +57,8 @@ object ObdParser {
                 "CAN ERROR" in upper || "BUS ERROR" in upper -> return DtcResult.BusError
             "NO DATA" in upper || "NODATA" in upper -> return DtcResult.NoData
         }
-        val hex = normalize(raw)
+        // Длинные списки кодов приходят несколькими кадрами — собираем ISO-TP.
+        val hex = IsoTp.reassemble(raw) ?: normalize(raw)
         val start = hex.indexOf("43").takeIf { it >= 0 } ?: hex.indexOf("47")
         if (start < 0) {
             return if (hex.isBlank()) DtcResult.NoData else DtcResult.Unknown(raw.trim())
@@ -100,12 +101,13 @@ object ObdParser {
     }
 
     /**
-     * VIN из ответа Mode 09 PID 02 (`49 02 …`). Ответ мультифреймовый: после
-     * каждого заголовка `4902` идёт байт-счётчик фрейма, затем ASCII-байты.
-     * Собираем все ASCII-символы и оставляем 17 буквенно-цифровых.
+     * VIN из ответа Mode 09 PID 02 (`49 02 …`). Ответ всегда мультифреймовый
+     * (17 символов + служебные байты > 7): сначала собираем ISO-TP в единый
+     * поток, затем после `4902` пропускаем байт-счётчик и читаем ASCII-байты,
+     * оставляя 17 буквенно-цифровых символов.
      */
     fun parseVin(raw: String): String? {
-        val hex = normalize(raw)
+        val hex = IsoTp.reassemble(raw) ?: normalize(raw)
         if (!hex.contains("4902")) return null
         val data = StringBuilder()
         for (part in hex.split("4902").drop(1)) {

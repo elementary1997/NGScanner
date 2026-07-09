@@ -92,4 +92,29 @@ class ObdParserTest {
     fun vinNullWhenNoFrame() {
         assertNull(ObdParser.parseVin("NO DATA"))
     }
+
+    // ---- ISO-TP: многофреймовый VIN, авто-форматирование ELM327 (CAF on) ----
+    @Test
+    fun parsesMultiframeVinColonFormat() {
+        // «014» — длина 20 байт; сегменты 0/1/2 с чистыми данными 4902 01 + ASCII.
+        val raw = "014\r0:49020158544132\r1:31303939305931\r2:323334353637\r>"
+        assertEquals("XTA210990Y1234567", ObdParser.parseVin(raw))
+    }
+
+    // ---- ISO-TP: сырые кадры First/Consecutive Frame (CAF off) ----
+    @Test
+    fun parsesMultiframeVinRawFrames() {
+        // 1014 — First Frame, длина 0x014; 21../22.. — Consecutive Frames.
+        val raw = "1014490201585441\r2132313039393059\r2231323334353637\r>"
+        assertEquals("XTA210990Y1234567", ObdParser.parseVin(raw))
+    }
+
+    // ---- ISO-TP: длинный список кодов, собранный из нескольких кадров ----
+    @Test
+    fun parsesMultiframeDtcColonFormat() {
+        // «00C» — 12 байт; 43 05 (счётчик) + пять кодов, разбитых на два сегмента.
+        val raw = "00C\r0:43050133042003\r1:0101710300\r>"
+        val result = ObdParser.parseDtcs(raw) as DtcResult.Ok
+        assertEquals(listOf("P0133", "P0420", "P0301", "P0171", "P0300"), result.codes)
+    }
 }
