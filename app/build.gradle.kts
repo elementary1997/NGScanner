@@ -13,8 +13,8 @@ android {
         applicationId = "ru.ngscanner"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.2.2"
+        versionCode = 5
+        versionName = "0.2.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -78,6 +78,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.markdown.renderer.m3)
     implementation(libs.androidx.security.crypto)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
 
     debugImplementation(libs.androidx.ui.tooling)
 

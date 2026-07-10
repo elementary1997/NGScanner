@@ -32,6 +32,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.SubcomposeAsyncImage
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -261,14 +263,72 @@ private fun CarCard(car: Car, isActive: Boolean, onClick: () -> Unit) {
 @Composable
 private fun BrandBadge(make: String, size: Dp) {
     val color = brandColor(make)
-    val letter = make.trim().firstOrNull { it.isLetter() }?.uppercaseChar()?.toString() ?: "?"
+    val url = brandLogoUrl(make)
     Box(
-        Modifier.size(size).clip(RoundedCornerShape(size / 3.4f)).background(color.copy(alpha = 0.16f)),
+        Modifier.size(size).clip(RoundedCornerShape(size / 3.4f)).background(color.copy(alpha = 0.14f)),
         contentAlignment = Alignment.Center,
     ) {
-        Text(letter, color = color, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.44f).sp)
+        if (url == null) {
+            Monogram(make, color, size)
+        } else {
+            // Логотип подгружается с CDN и кешируется Coil'ом; офлайн/404 → монограмма.
+            SubcomposeAsyncImage(
+                model = url,
+                contentDescription = make,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize().padding(size * 0.16f),
+                loading = { Box(Modifier.fillMaxSize(), Alignment.Center) { Monogram(make, color, size) } },
+                error = { Box(Modifier.fillMaxSize(), Alignment.Center) { Monogram(make, color, size) } },
+            )
+        }
     }
 }
+
+@Composable
+private fun Monogram(make: String, color: Color, size: Dp) {
+    val letter = make.trim().firstOrNull { it.isLetter() }?.uppercaseChar()?.toString() ?: "?"
+    Text(letter, color = color, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.44f).sp)
+}
+
+/**
+ * URL логотипа марки на CDN (avto-dev/vehicle-logotypes, imgix). Логотипы НЕ кладём в
+ * репозиторий (товарные знаки), грузим по сети и кешируем. Слаг = имя марки в нижнем
+ * регистре; для кириллических имён — таблица, иначе латиница напрямую. `null` — слаг
+ * неизвестен, показываем монограмму.
+ */
+private fun brandLogoUrl(make: String): String? {
+    val slug = brandSlug(make) ?: return null
+    return "https://vl.imgix.net/img/$slug-logo.png?w=128&h=128&fit=clip"
+}
+
+private fun brandSlug(make: String): String? {
+    val key = make.trim().lowercase()
+    BRAND_SLUG[key]?.let { return it }
+    // Латинское имя марки → слаг напрямую (Chevrolet→chevrolet, Great Wall→great-wall).
+    if (key.isNotEmpty() && key.all { it in 'a'..'z' || it in '0'..'9' || it == ' ' || it == '-' || it == '.' }) {
+        return key.replace(' ', '-')
+    }
+    return null
+}
+
+/** Кириллические имена марок → слаг CDN (проверенные значения; ВАЗ→lada). */
+private val BRAND_SLUG: Map<String, String> = mapOf(
+    "лада" to "lada", "ваз" to "lada",
+    "уаз" to "uaz", "газ" to "gaz", "камаз" to "kamaz",
+    "шевроле" to "chevrolet", "тойота" to "toyota", "фольксваген" to "volkswagen",
+    "ниссан" to "nissan", "рено" to "renault", "форд" to "ford", "шкода" to "skoda",
+    "мерседес" to "mercedes-benz", "мерседес-бенц" to "mercedes-benz", "ауди" to "audi",
+    "мазда" to "mazda", "хонда" to "honda", "митсубиси" to "mitsubishi", "опель" to "opel",
+    "пежо" to "peugeot", "ситроен" to "citroen", "вольво" to "volvo", "субару" to "subaru",
+    "лексус" to "lexus", "сузуки" to "suzuki", "дэу" to "daewoo", "чери" to "chery",
+    "джили" to "geely", "хавейл" to "haval", "грейт волл" to "great-wall",
+    "ссангйонг" to "ssangyong", "инфинити" to "infiniti", "киа" to "kia",
+    "хендай" to "hyundai", "хёндэ" to "hyundai", "ленд ровер" to "land-rover",
+    "ягуар" to "jaguar", "фиат" to "fiat", "порше" to "porsche", "датсун" to "datsun",
+    "равон" to "ravon", "кадиллак" to "cadillac", "додж" to "dodge", "крайслер" to "chrysler",
+    "акура" to "acura", "дженесис" to "genesis", "тесла" to "tesla", "дачия" to "dacia",
+    "чанган" to "changan", "лифан" to "lifan", "москвич" to "moskvich", "исузу" to "isuzu",
+)
 
 private fun brandColor(make: String): Color {
     val key = make.trim().lowercase()
