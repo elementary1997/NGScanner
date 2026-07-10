@@ -48,6 +48,7 @@ import ru.ngscanner.llm.ToolCall
 import ru.ngscanner.llm.LlmException
 import ru.ngscanner.obd.DtcDatabase
 import ru.ngscanner.obd.Elm327
+import ru.ngscanner.obd.FuelCalc
 import ru.ngscanner.obd.ObdParser
 import ru.ngscanner.obd.ObdPid
 import ru.ngscanner.service.ObdForegroundService
@@ -126,6 +127,13 @@ data class UiState(
     val graphPids: List<String> = emptyList(),
     // Выбор и порядок PID для дашборда (пустой = дефолтная раскладка).
     val dashboardPids: List<String> = emptyList(),
+    // Расход топлива: мгновенный (л/100км при движении, л/ч на месте) и за текущую поездку.
+    val instantLper100: Double? = null,
+    val instantLperH: Double = 0.0,
+    val tripFuelLiters: Double = 0.0,
+    val tripDistanceKm: Double = 0.0,
+    val tripAvgLper100: Double? = null,
+    val fuelPrice: Double = 0.0,
     val error: String? = null,
     // диагностика / чат с LLM
     val chat: List<ChatMessage> = emptyList(),
@@ -203,6 +211,7 @@ private class LoadedState(
     val updateCheck: Boolean,
     val pollIntervalMs: Long,
     val appVersion: String,
+    val fuelPrice: Double,
 )
 
 /**
@@ -226,6 +235,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // перехода параметров в критическую зону для сохранения окна вокруг события.
     private val tripBuffer = ArrayList<TripSample>()
     private var tripStartMs = 0L
+
+    // Инкрементальный интеграл расхода и дистанции за поездку — источник истины (в
+    // отличие от tripBuffer, который прореживается и занизил бы результат).
+    private var accFuelLiters = 0.0
+    private var accDistanceKm = 0.0
+    private var lastFuelMs: Long? = null
     private val recordedPids = LinkedHashSet<String>()
     private var prevCritical = emptySet<ObdPid>()
 
@@ -273,6 +288,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     updateCheck = settings.updateCheck,
                     pollIntervalMs = settings.pollIntervalMs,
                     appVersion = AppUpdater.currentVersion(app),
+                    fuelPrice = settings.fuelPrice,
                 )
             }
             if (llmHistory.isEmpty()) llmHistory = loaded.history
@@ -312,6 +328,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     updateCheck = loaded.updateCheck,
                     pollIntervalMs = loaded.pollIntervalMs,
                     appVersion = loaded.appVersion,
+                    fuelPrice = loaded.fuelPrice,
                 )
             }
             // Проверка новой версии при запуске (если включена в настройках).
@@ -509,6 +526,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         tripBuffer.clear()
         recordedPids.clear()
         tripStartMs = System.currentTimeMillis()
+        accFuelLiters = 0.0
+        accDistanceKm = 0.0
+        lastFuelMs = null
         prevCritical = emptySet()
         _ui.update { it.copy(recording = true) }
     }
@@ -516,6 +536,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Добавляет снимок в буфер поездки; при переполнении прореживает вдвое. */
     private fun recordTripSample(now: Long, values: Map<ObdPid, Double>) {
         if (!_ui.value.recording) return
+        // Расход: инкрементально интегрируем из MAF + скорость (+λ) по фактическому dt.
+        val maf = values[ObdPid.MAF]
+        val speed = values[ObdPid.SPEED]
+        val lambda = values[ObdPid.O2_LAMBDA]
+        lastFuelMs?.let { prev ->
+            val (df, dd) = FuelCalc.step(maf, speed, (now - prev) / 1000.0, lambda)
+            accFuelLiters += df
+            accDistanceKm += dd
+        }
+        lastFuelMs = now
+        val instant = if (maf != null && speed != null) FuelCalc.instantLper100(maf, speed, lambda) else null
+        _ui.update {
+            it.copy(
+                instantLper100 = instant,
+                instantLperH = maf?.let { m -> FuelCalc.litersPerHour(m, lambda) } ?: 0.0,
+                tripFuelLiters = accFuelLiters,
+                tripDistanceKm = accDistanceKm,
+                tripAvgLper100 = FuelCalc.avgLper100(accFuelLiters, accDistanceKm),
+            )
+        }
         values.keys.forEach { recordedPids.add(it.name) }
         tripBuffer.add(TripSample(now, values.mapKeys { it.key.name }))
         if (tripBuffer.size > MAX_TRIP_SAMPLES) {
@@ -553,6 +593,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             id = TripRepository.newId(), kind = TripKind.TRIP,
             startMs = start, endMs = samples.last().t,
             carTitle = carTitle, pids = pids, samples = samples,
+            fuelLiters = accFuelLiters, distanceKm = accDistanceKm,
         )
     }
 
@@ -629,6 +670,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setDashboardPids(pids: List<String>) {
         settings.dashboardPids = pids
         _ui.update { it.copy(dashboardPids = pids) }
+    }
+
+    /** Цена топлива, ₽/л (для оценки стоимости поездок; 0 = не задана). */
+    fun setFuelPrice(price: Double) {
+        settings.fuelPrice = price
+        _ui.update { it.copy(fuelPrice = price) }
     }
 
     // ---- Настройки поведения ----

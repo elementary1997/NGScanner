@@ -118,6 +118,7 @@ internal fun DevicesTab(
             onDelete = onDeleteTrip,
             onExport = onExportTrip,
             loadTrip = loadTrip,
+            fuelPrice = ui.fuelPrice,
         )
         return
     }
@@ -203,6 +204,7 @@ private fun DevicesConnected(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     Spacer(Modifier.height(4.dp))
+                    FuelCard(ui.instantLper100, ui.instantLperH, ui.tripAvgLper100, ui.tripFuelLiters, ui.fuelPrice)
                     Dashboard(ui.metrics, ui.history, ui.supportedPids, ui.dashboardPids, onDisconnect, onOpenGraph, onOpenDtc, onSetDashboardPids)
                     ui.error?.let { ErrorCard(it) }
                     Spacer(Modifier.height(16.dp))

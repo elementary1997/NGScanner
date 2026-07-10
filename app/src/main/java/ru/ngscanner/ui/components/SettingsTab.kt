@@ -264,6 +264,18 @@ private fun BehaviorContent(ui: UiState, vm: MainViewModel) {
         PollChip("Обычно", AppSettings.DEFAULT_POLL_MS, ui.pollIntervalMs, vm::setPollIntervalMs)
         PollChip("Быстро", AppSettings.POLL_MS_FAST, ui.pollIntervalMs, vm::setPollIntervalMs)
     }
+    var fuelText by remember(ui.fuelPrice) { mutableStateOf(if (ui.fuelPrice > 0) "%.2f".format(ui.fuelPrice) else "") }
+    OutlinedTextField(
+        value = fuelText,
+        onValueChange = { v ->
+            fuelText = v.filter { it.isDigit() || it == '.' || it == ',' }
+            vm.setFuelPrice(fuelText.replace(',', '.').toDoubleOrNull() ?: 0.0)
+        },
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text("Цена топлива, ₽/л (оценка стоимости поездок)") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+    )
 }
 
 @Composable

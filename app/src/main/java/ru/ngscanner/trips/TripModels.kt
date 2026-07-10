@@ -25,8 +25,15 @@ data class Trip(
     val trigger: String? = null,
     val pids: List<String> = emptyList(),
     val samples: List<TripSample> = emptyList(),
+    // Расход за поездку — физика (литры и км), стоимость считается в UI по цене топлива.
+    // Старые файлы без этих полей десериализуются в 0.0.
+    val fuelLiters: Double = 0.0,
+    val distanceKm: Double = 0.0,
 ) {
-    fun toMeta() = TripMeta(id, kind, startMs, endMs, carTitle, trigger, samples.size)
+    fun toMeta() = TripMeta(id, kind, startMs, endMs, carTitle, trigger, samples.size, fuelLiters, distanceKm)
+
+    /** Средний расход л/100км; `null` на слишком короткой поездке. */
+    val avgLper100: Double? get() = if (distanceKm > 0.05) fuelLiters / distanceKm * 100.0 else null
 }
 
 /** Лёгкая карточка записи для списка — без самих точек (их много). */
@@ -39,7 +46,12 @@ data class TripMeta(
     val carTitle: String? = null,
     val trigger: String? = null,
     val sampleCount: Int,
+    val fuelLiters: Double = 0.0,
+    val distanceKm: Double = 0.0,
 ) {
     /** Длительность записи в секундах. */
     val durationSec: Long get() = ((endMs - startMs) / 1000L).coerceAtLeast(0)
+
+    /** Средний расход л/100км; `null` на слишком короткой поездке (нет надёжной дистанции). */
+    val avgLper100: Double? get() = if (distanceKm > 0.05) fuelLiters / distanceKm * 100.0 else null
 }

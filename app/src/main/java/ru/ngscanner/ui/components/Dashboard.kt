@@ -247,6 +247,47 @@ private fun DashboardPidsDialog(
     )
 }
 
+/** Живая плитка расхода топлива: мгновенный + средний за поездку и стоимость. */
+@Composable
+internal fun FuelCard(
+    instantLper100: Double?,
+    instantLperH: Double,
+    tripAvgLper100: Double?,
+    tripFuelLiters: Double,
+    fuelPrice: Double,
+) {
+    val cs = MaterialTheme.colorScheme
+    ElevatedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.LocalGasStation, null, Modifier.size(22.dp), tint = cs.primary)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Расход", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                val main = when {
+                    instantLper100 != null -> "${formatMetric(instantLper100)} л/100км"
+                    instantLperH > 0 -> "${formatMetric(instantLperH)} л/ч"
+                    else -> "—"
+                }
+                Text(
+                    main,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    color = cs.onSurface,
+                )
+                tripAvgLper100?.let { avg ->
+                    val cost = if (fuelPrice > 0 && tripFuelLiters > 0) " · ${formatMetric(tripFuelLiters * fuelPrice)} ₽" else ""
+                    Text(
+                        "сред. за поездку ${formatMetric(avg)} л/100км$cost",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = cs.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun MetricsSection(
     title: String,

@@ -61,12 +61,13 @@ internal fun TripsScreen(
     onDelete: (String) -> Unit,
     onExport: (String) -> Unit,
     loadTrip: suspend (String) -> Trip?,
+    fuelPrice: Double,
 ) {
     var viewing by remember { mutableStateOf<String?>(null) }
     val openId = viewing
     if (openId != null) {
         BackHandler { viewing = null }
-        TripView(openId, onBack = { viewing = null }, onExport = onExport, loadTrip = loadTrip)
+        TripView(openId, onBack = { viewing = null }, onExport = onExport, loadTrip = loadTrip, fuelPrice = fuelPrice)
         return
     }
     BackHandler(onBack = onBack)
@@ -87,7 +88,7 @@ internal fun TripsScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(metas, key = { it.id }) { meta ->
-                    TripRow(meta, onOpen = { viewing = meta.id }, onExport = { onExport(meta.id) }, onDelete = { onDelete(meta.id) })
+                    TripRow(meta, fuelPrice, onOpen = { viewing = meta.id }, onExport = { onExport(meta.id) }, onDelete = { onDelete(meta.id) })
                 }
                 item { Spacer(Modifier.height(16.dp)) }
             }
@@ -96,7 +97,7 @@ internal fun TripsScreen(
 }
 
 @Composable
-private fun TripRow(meta: TripMeta, onOpen: () -> Unit, onExport: () -> Unit, onDelete: () -> Unit) {
+private fun TripRow(meta: TripMeta, fuelPrice: Double, onOpen: () -> Unit, onExport: () -> Unit, onDelete: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val isEvent = meta.kind == TripKind.EVENT
     ElevatedCard(onClick = onOpen, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
@@ -120,6 +121,15 @@ private fun TripRow(meta: TripMeta, onOpen: () -> Unit, onExport: () -> Unit, on
                     style = MaterialTheme.typography.bodySmall,
                     color = cs.onSurfaceVariant,
                 )
+                meta.avgLper100?.let { avg ->
+                    val cost = if (fuelPrice > 0 && meta.fuelLiters > 0) " · ${formatMetric(meta.fuelLiters * fuelPrice)} ₽" else ""
+                    Text(
+                        "${formatMetric(avg)} л/100км$cost",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = cs.primary,
+                    )
+                }
                 meta.carTitle?.takeIf { it.isNotBlank() }?.let {
                     Text(it, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                 }
@@ -136,6 +146,7 @@ private fun TripView(
     onBack: () -> Unit,
     onExport: (String) -> Unit,
     loadTrip: suspend (String) -> Trip?,
+    fuelPrice: Double,
 ) {
     val cs = MaterialTheme.colorScheme
     var trip by remember(id) { mutableStateOf<Trip?>(null) }
@@ -169,6 +180,18 @@ private fun TripView(
                         style = MaterialTheme.typography.bodySmall,
                         color = cs.onSurfaceVariant,
                     )
+                    t.avgLper100?.let { avg ->
+                        val cost = if (fuelPrice > 0 && t.fuelLiters > 0) ", ≈ ${formatMetric(t.fuelLiters * fuelPrice)} ₽" else ""
+                        Surface(shape = RoundedCornerShape(12.dp), color = cs.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                "Средний расход ${formatMetric(avg)} л/100км · потрачено ${formatMetric(t.fuelLiters)} л · " +
+                                    "${formatMetric(t.distanceKm)} км$cost",
+                                Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = cs.onSurface,
+                            )
+                        }
+                    }
                     val pids = t.pids.mapNotNull { runCatching { ObdPid.valueOf(it) }.getOrNull() }
                     pids.forEach { pid ->
                         val series = tripSeries(t, pid)
