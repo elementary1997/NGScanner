@@ -29,6 +29,17 @@ class ModelNormsRepository(context: Context) {
         prefs.edit().putString(KEY, json.encodeToString(all)).apply()
     }
 
+    /**
+     * Удаляет все нормы машины (при удалении её из гаража). carId — неповторяемый
+     * UUID, поэтому без чистки JSON норм рос бы монотонно (осиротевшие записи).
+     */
+    fun clearFor(carId: String) {
+        val all = load()
+        if (carId !in all) return
+        val updated = all.toMutableMap().apply { remove(carId) }
+        prefs.edit().putString(KEY, json.encodeToString(updated)).apply()
+    }
+
     private fun load(): Map<String, Map<String, String>> {
         val raw = prefs.getString(KEY, null) ?: return emptyMap()
         return runCatching { json.decodeFromString<Map<String, Map<String, String>>>(raw) }.getOrDefault(emptyMap())

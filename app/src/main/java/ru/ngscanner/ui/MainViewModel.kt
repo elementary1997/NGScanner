@@ -58,6 +58,8 @@ import ru.ngscanner.settings.ModelPrice
 import ru.ngscanner.settings.ModelUsage
 import ru.ngscanner.settings.SessionSummary
 import ru.ngscanner.settings.UsageRepository
+import ru.ngscanner.update.AppUpdater
+import ru.ngscanner.update.UpdateInfo
 import ru.ngscanner.transport.ClassicSppTransport
 import ru.ngscanner.trips.Trip
 import ru.ngscanner.trips.TripKind
@@ -114,6 +116,9 @@ data class UiState(
     val dtcChecked: Boolean = false,
     val dtcItems: List<DtcItem> = emptyList(),
     val dtcError: String? = null,
+    // Не-блокирующее предупреждение: часть режимов упала с ошибкой шины, но коды из
+    // других режимов прочитаны и показаны (в отличие от dtcError, который прячет коды).
+    val dtcWarning: String? = null,
     // запись поездки: идёт ли, сохранённые поездки/события, выбор параметров панели графиков
     val recording: Boolean = false,
     val tripMetas: List<TripMeta> = emptyList(),
@@ -133,13 +138,25 @@ data class UiState(
     // настройки провайдера
     val provider: ProviderId = ProviderId.CLAUDE,
     val model: String = AppSettings.DEFAULT_MODEL,
+    // Только признак наличия ключа. Сам ключ НЕ держим в наблюдаемом состоянии
+    // (логи/скриншоты/дампы StateFlow не должны его раскрывать) — путь запроса
+    // читает ключ напрямую из настроек, поле ввода сеет разово (см. currentApiKey).
     val hasKey: Boolean = false,
-    val apiKey: String = "",
     val testing: Boolean = false,
     val testStatus: TestStatus? = null,
     val availableModels: List<LlmModel> = emptyList(),
     // ключи хранятся в зашифрованном виде (false — редкий фолбэк на plaintext)
     val keysEncrypted: Boolean = true,
+    // --- Настройки поведения ---
+    val batteryGuard: Boolean = true,
+    val keepScreenOn: Boolean = true,
+    val updateCheck: Boolean = true,
+    val pollIntervalMs: Long = AppSettings.DEFAULT_POLL_MS,
+    // --- Обновление приложения ---
+    val appVersion: String = "",
+    val updateInfo: UpdateInfo? = null, // непусто, если найдена более новая версия
+    val updateChecking: Boolean = false,
+    val updateStatus: String? = null, // человекочитаемый статус проверки/загрузки
     // расход токенов: за сессию приложения (сумма) и помодельно по провайдеру + цены
     val sessionTokens: Int = 0,
     val modelUsage: List<ModelUsage> = emptyList(),
@@ -150,6 +167,8 @@ data class UiState(
     val vinDecoding: Boolean = false,
     val vinResult: VinInfo? = null,
     val vinError: String? = null,
+    // Модели марки из каталога — подсказка, когда VIN дал марку, но не модель.
+    val vinModelOptions: List<VehicleSuggestion> = emptyList(),
     // VIN, считанный прямо с ЭБУ (Mode 09): подставляется в поле формы добавления по VIN.
     val vinScanning: Boolean = false,
     val ecuVin: String? = null,
@@ -165,7 +184,6 @@ private class LoadedState(
     val provider: ProviderId,
     val model: String,
     val hasKey: Boolean,
-    val apiKey: String,
     val garage: Garage,
     val modelNorms: Map<String, String>,
     val chat: List<ChatMessage>,
@@ -177,6 +195,11 @@ private class LoadedState(
     val history: List<LlmMessage>,
     val graphPids: List<String>,
     val tripMetas: List<TripMeta>,
+    val batteryGuard: Boolean,
+    val keepScreenOn: Boolean,
+    val updateCheck: Boolean,
+    val pollIntervalMs: Long,
+    val appVersion: String,
 )
 
 /**
@@ -230,7 +253,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     provider = provider,
                     model = settings.model,
                     hasKey = key.isNotBlank(),
-                    apiKey = key,
                     garage = garage,
                     modelNorms = garage.activeCar?.let { c -> normsRepo.normsFor(c.id) } ?: emptyMap(),
                     chat = chatRepo.loadChat(),
@@ -242,6 +264,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     history = chatRepo.loadHistory(),
                     graphPids = settings.graphPids,
                     tripMetas = tripRepo.metas(),
+                    batteryGuard = settings.batteryGuard,
+                    keepScreenOn = settings.keepScreenOn,
+                    updateCheck = settings.updateCheck,
+                    pollIntervalMs = settings.pollIntervalMs,
+                    appVersion = AppUpdater.currentVersion(app),
                 )
             }
             if (llmHistory.isEmpty()) llmHistory = loaded.history
@@ -253,7 +280,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _ui.update { cur ->
                 // Парные поля вливаем группой, иначе можно подтянуть устаревшее
                 // companion-значение (modelNorms старой машины; hasKey для чужого ключа).
-                val loadProvider = cur.provider == empty.provider && cur.apiKey == empty.apiKey
+                // hasKey заменяет прежний признак «пользователь трогал ключ»: если ключ
+                // уже установлен в состоянии (сохранён за время загрузки) — не откатываем.
+                val loadProvider = cur.provider == empty.provider && !cur.hasKey
                 val loadGarage = cur.garage == empty.garage
                 cur.copy(
                     provider = if (loadProvider) loaded.provider else cur.provider,
@@ -261,7 +290,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     // отдельный гард, чтобы ранний выбор не затёрся снимком с диска.
                     model = if (cur.model == empty.model) loaded.model else cur.model,
                     hasKey = if (loadProvider) loaded.hasKey else cur.hasKey,
-                    apiKey = if (loadProvider) loaded.apiKey else cur.apiKey,
                     modelUsage = if (loadProvider) loaded.modelUsage else cur.modelUsage,
                     modelPrices = if (cur.modelPrices == empty.modelPrices) loaded.modelPrices else cur.modelPrices,
                     garage = if (loadGarage) loaded.garage else cur.garage,
@@ -272,8 +300,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     favorites = if (cur.favorites == empty.favorites) loaded.favorites else cur.favorites,
                     graphPids = if (cur.graphPids == empty.graphPids) loaded.graphPids else cur.graphPids,
                     tripMetas = if (cur.tripMetas == empty.tripMetas) loaded.tripMetas else cur.tripMetas,
+                    // Настройки поведения и версия: тумблеры редко трогают за время загрузки,
+                    // а сеттеры пишут и на диск, и в состояние — вливаем значения с диска.
+                    batteryGuard = loaded.batteryGuard,
+                    keepScreenOn = loaded.keepScreenOn,
+                    updateCheck = loaded.updateCheck,
+                    pollIntervalMs = loaded.pollIntervalMs,
+                    appVersion = loaded.appVersion,
                 )
             }
+            // Проверка новой версии при запуске (если включена в настройках).
+            if (loaded.updateCheck) checkForUpdate(manual = false)
         }
     }
 
@@ -431,13 +468,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     attemptReconnect()
                     break
                 }
-                // Защита АКБ: ЭБУ давно не отвечает (зажигание выкл / забытый адаптер) — отключаемся.
-                if (System.currentTimeMillis() - lastDataAt > BATTERY_GUARD_MS) {
+                // Защита АКБ: ЭБУ давно не отвечает (зажигание выкл / забытый адаптер) —
+                // отключаемся, если защита включена в настройках (можно выключить для
+                // длительного мониторинга на заведённом двигателе).
+                if (settings.batteryGuard && System.currentTimeMillis() - lastDataAt > BATTERY_GUARD_MS) {
                     autoDisconnectForBattery()
                     break
                 }
                 // Адаптивный интервал: пока данных нет — опрашиваем реже (шина и батарея).
-                delay(if (emptyStreak >= IDLE_THRESHOLD) POLL_IDLE_MS else POLL_INTERVAL_MS)
+                // Базовый интервал берём из настроек (экономный/обычный/быстрый).
+                delay(if (emptyStreak >= IDLE_THRESHOLD) POLL_IDLE_MS else settings.pollIntervalMs)
             }
         }
     }
@@ -481,7 +521,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Сохраняет поездку при отключении, если она достаточно длинная. */
     private fun finishTripRecording() {
-        if (!_ui.value.recording) return
+        val trip = takeTripSnapshot() ?: return
+        viewModelScope.launch {
+            val metas = withContext(Dispatchers.IO) { tripRepo.save(trip) }
+            _ui.update { it.copy(tripMetas = metas) }
+        }
+    }
+
+    /**
+     * Снимает накопленную поездку для сохранения: опустошает буфер и сбрасывает флаг
+     * записи, возвращает готовый [Trip] или `null` (запись не шла / поездка коротка).
+     * Отделено от персиста, чтобы onCleared мог сохранить синхронно, когда
+     * viewModelScope уже отменяется.
+     */
+    private fun takeTripSnapshot(): Trip? {
+        if (!_ui.value.recording) return null
         val samples = ArrayList(tripBuffer)
         val start = tripStartMs
         val pids = recordedPids.toList()
@@ -489,19 +543,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         tripBuffer.clear()
         recordedPids.clear()
         _ui.update { it.copy(recording = false) }
-        if (samples.size < MIN_TRIP_SAMPLES) return // слишком короткая — не сохраняем
-        viewModelScope.launch {
-            val metas = withContext(Dispatchers.IO) {
-                tripRepo.save(
-                    Trip(
-                        id = TripRepository.newId(), kind = TripKind.TRIP,
-                        startMs = start, endMs = samples.last().t,
-                        carTitle = carTitle, pids = pids, samples = samples,
-                    ),
-                )
-            }
-            _ui.update { it.copy(tripMetas = metas) }
-        }
+        if (samples.size < MIN_TRIP_SAMPLES) return null // слишком короткая — не сохраняем
+        return Trip(
+            id = TripRepository.newId(), kind = TripKind.TRIP,
+            startMs = start, endMs = samples.last().t,
+            carTitle = carTitle, pids = pids, samples = samples,
+        )
     }
 
     /** Детект перехода параметра в критическую зону → сохранение окна события. */
@@ -573,8 +620,76 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(graphPids = pids) }
     }
 
+    // ---- Настройки поведения ----
+
+    fun setBatteryGuard(enabled: Boolean) {
+        settings.batteryGuard = enabled
+        _ui.update { it.copy(batteryGuard = enabled) }
+    }
+
+    fun setKeepScreenOn(enabled: Boolean) {
+        settings.keepScreenOn = enabled
+        _ui.update { it.copy(keepScreenOn = enabled) }
+    }
+
+    fun setUpdateCheck(enabled: Boolean) {
+        settings.updateCheck = enabled
+        _ui.update { it.copy(updateCheck = enabled) }
+    }
+
+    fun setPollIntervalMs(ms: Long) {
+        settings.pollIntervalMs = ms
+        _ui.update { it.copy(pollIntervalMs = ms) }
+    }
+
+    // ---- Обновление приложения ----
+
+    /**
+     * Проверяет наличие новой версии. [manual] — запущено кнопкой (показываем статус
+     * «актуальная версия»/ошибку). При автопроверке на старте, если версия новее,
+     * кладём в состояние и шлём системное уведомление.
+     */
+    fun checkForUpdate(manual: Boolean) {
+        if (_ui.value.updateChecking) return
+        _ui.update { it.copy(updateChecking = true, updateStatus = if (manual) "Проверяю обновления…" else it.updateStatus) }
+        viewModelScope.launch {
+            val info = runCatching { AppUpdater.checkLatest(getApplication()) }.getOrNull()
+            _ui.update {
+                when {
+                    info != null && info.newer ->
+                        it.copy(updateChecking = false, updateInfo = info, updateStatus = null)
+                    manual && info != null ->
+                        it.copy(updateChecking = false, updateInfo = null, updateStatus = "Установлена актуальная версия.")
+                    manual ->
+                        it.copy(updateChecking = false, updateStatus = "Не удалось проверить обновления (нет сети или релизов).")
+                    else -> it.copy(updateChecking = false)
+                }
+            }
+            if (info != null && info.newer && !manual) {
+                AppUpdater.notifyAvailable(getApplication(), info)
+            }
+        }
+    }
+
+    /** Качает найденное обновление и запускает системный установщик. */
+    fun installUpdate() {
+        val info = _ui.value.updateInfo ?: return
+        _ui.update { it.copy(updateStatus = "Загружаю обновление…") }
+        viewModelScope.launch {
+            val ok = runCatching { AppUpdater.downloadAndInstall(getApplication(), info) }.isSuccess
+            _ui.update { it.copy(updateStatus = if (ok) "Открываю установщик…" else "Не удалось скачать обновление.") }
+        }
+    }
+
+    fun dismissUpdateStatus() {
+        _ui.update { it.copy(updateStatus = null) }
+    }
+
     fun disconnect() {
         reconnecting = false
+        // Агент-диагност захватил ссылку на elm в момент запроса — без отмены он
+        // продолжил бы дёргать инструменты через закрытый сокет и жечь токены API.
+        diagnoseJob?.cancel()
         lastAddress = null
         stopPolling()
         finishTripRecording() // сохраняем поездку до сброса состояния
@@ -820,18 +935,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Общая обвязка операций с кодами: пауза опроса, флаги, восстановление. */
-    private fun runDtcOp(op: suspend () -> Pair<List<DtcItem>, Boolean>) {
-        _ui.update { it.copy(dtcReading = true, dtcError = null) }
+    private fun runDtcOp(op: suspend () -> Pair<List<DtcItem>, List<String>>) {
+        _ui.update { it.copy(dtcReading = true, dtcError = null, dtcWarning = null) }
         val wasPolling = pollJob?.isActive == true
         stopPolling()
         viewModelScope.launch {
             try {
-                val (items, busError) = op()
+                val (items, failedModes) = op()
+                // Жёсткая ошибка — только когда ничего не прочитано И была ошибка шины.
+                // Если часть режимов упала, но коды из других есть — показываем коды
+                // и НЕ-блокирующее предупреждение, чтобы не потерять, например, факт
+                // «постоянные коды прочитать не удалось».
+                val hardError = failedModes.isNotEmpty() && items.isEmpty()
                 _ui.update {
                     it.copy(
                         dtcReading = false, dtcChecked = true, dtcItems = items,
-                        dtcError = if (busError && items.isEmpty()) {
+                        dtcError = if (hardError) {
                             "Нет связи с ЭБУ (ошибка шины). Проверьте зажигание и разъём OBD."
+                        } else {
+                            null
+                        },
+                        dtcWarning = if (!hardError && failedModes.isNotEmpty()) {
+                            "Часть кодов прочитать не удалось (ошибка шины): ${failedModes.joinToString(", ")}. " +
+                                "Показаны только успешно прочитанные — отсутствие остальных не значит, что там пусто."
                         } else {
                             null
                         },
@@ -845,24 +971,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Читает и расшифровывает коды всех трёх режимов; второй элемент — была ли ошибка шины. */
-    private suspend fun readAllDtc(e: Elm327): Pair<List<DtcItem>, Boolean> = withContext(Dispatchers.IO) {
+    /** Читает коды всех трёх режимов; второй элемент — список режимов с ошибкой шины. */
+    private suspend fun readAllDtc(e: Elm327): Pair<List<DtcItem>, List<String>> = withContext(Dispatchers.IO) {
         val app = getApplication<Application>()
         val isCan = e.isCan()
         val hl = e.headerHexLen()
         val out = mutableListOf<DtcItem>()
-        var bus = false
-        suspend fun read(cmd: String, header: String, cat: DtcCategory) {
+        val failed = mutableListOf<String>()
+        suspend fun read(cmd: String, header: String, cat: DtcCategory, label: String) {
             when (val r = ObdParser.parseDtcs(e.command(cmd), isCan, hl, header)) {
                 is ObdParser.DtcResult.Ok -> r.codes.forEach { out.add(DtcItem(it, DtcDatabase.describe(app, it), cat)) }
-                ObdParser.DtcResult.BusError -> bus = true
+                ObdParser.DtcResult.BusError -> failed.add(label)
                 else -> {}
             }
         }
-        read("03", "43", DtcCategory.ACTIVE)
-        read("07", "47", DtcCategory.PENDING)
-        read("0A", "4A", DtcCategory.PERMANENT)
-        out.toList() to bus
+        read("03", "43", DtcCategory.ACTIVE, "активные")
+        read("07", "47", DtcCategory.PENDING, "неподтверждённые")
+        read("0A", "4A", DtcCategory.PERMANENT, "постоянные")
+        out.toList() to failed.toList()
     }
 
     /** Отправляет агенту запрос разобрать причины и ремонт по конкретному коду. */
@@ -893,17 +1019,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * и переполнение контекста). Отрезаем старое, но начинаем с хода пользователя
      * — иначе разрыв пары tool_use/tool_result вызовет 400 у провайдера.
      */
-    private fun trimLlmHistory(history: List<LlmMessage>): List<LlmMessage> {
-        if (history.size <= MAX_HISTORY_MSGS) return history
-        var start = history.size - MAX_HISTORY_MSGS
-        while (start < history.size && history[start].role != Role.USER) start++
-        if (start < history.size) return history.drop(start)
-        // В хвостовом окне нет хода пользователя — расширяем назад до последнего USER,
-        // чтобы не начать с tool_result (провайдер вернёт 400). Нет USER вовсе —
-        // отдаём историю целиком, не takeLast с разорванной парой tool_use/tool_result.
-        val lastUser = history.indexOfLast { it.role == Role.USER }
-        return if (lastUser >= 0) history.drop(lastUser) else history
-    }
+    private fun trimLlmHistory(history: List<LlmMessage>): List<LlmMessage> =
+        trimHistory(history, MAX_HISTORY_MSGS)
 
     private fun errorMessage(ex: Throwable): String =
         (ex as? LlmException ?: LlmException.from(ex)).userMessage()
@@ -1080,19 +1197,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Декодирует VIN через vPIC; результат кладёт в [UiState.vinResult]. */
+    /** Декодирует VIN (офлайн для РФ, vPIC для иномарок); результат кладёт в [UiState.vinResult]. */
     fun decodeVin(vin: String) {
         if (vin.isBlank() || _ui.value.vinDecoding) return
-        _ui.update { it.copy(vinDecoding = true, vinError = null, vinResult = null) }
+        _ui.update { it.copy(vinDecoding = true, vinError = null, vinResult = null, vinModelOptions = emptyList()) }
         viewModelScope.launch {
             val info = runCatching { VinDecoder.decode(vin) }.getOrNull()
-            _ui.update {
-                if (info != null) {
-                    it.copy(vinDecoding = false, vinResult = info)
-                } else {
-                    it.copy(vinDecoding = false, vinError = "Не удалось распознать VIN. Проверьте номер или введите вручную.")
-                }
+            if (info == null) {
+                _ui.update { it.copy(vinDecoding = false, vinError = "Не удалось распознать VIN. Проверьте номер или введите вручную.") }
+                return@launch
             }
+            // Модель не определилась (частый случай для РФ-VIN) — подсказываем модели
+            // этой марки из офлайн-каталога, чтобы пользователь выбрал, а не печатал.
+            val options = if (info.model.isBlank()) {
+                runCatching { VehicleCatalog.modelsForMake(getApplication(), info.make) }.getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+            _ui.update { it.copy(vinDecoding = false, vinResult = info, vinModelOptions = options) }
         }
     }
 
@@ -1155,6 +1277,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteCar(carId: String) {
         val garage = garageRepo.deleteCar(carId)
+        // Чистим нормы удалённой машины — иначе они остаются осиротевшими навсегда.
+        normsRepo.clearFor(carId)
         _ui.update {
             it.copy(
                 garage = garage,
@@ -1263,7 +1387,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 provider = p,
                 model = settings.model,
                 hasKey = settings.apiKey(p).isNotBlank(),
-                apiKey = settings.apiKey(p),
                 testStatus = null,
                 availableModels = emptyList(),
                 modelUsage = usageRepo.models(p),
@@ -1278,6 +1401,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Проверяет ключ запросом списка моделей; при успехе сохраняет ключ и модели. */
+    /**
+     * Текущий API-ключ провайдера — для одноразового засева поля ввода в настройках.
+     * Ключ не держим в наблюдаемом состоянии; читаем из настроек по требованию.
+     */
+    fun currentApiKey(): String = settings.apiKey(_ui.value.provider)
+
     fun testConnection(key: String) {
         if (key.isBlank() || _ui.value.testing) return
         settings.setApiKey(_ui.value.provider, key)
@@ -1293,7 +1422,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         testing = false,
                         testStatus = TestStatus.Success,
                         hasKey = true,
-                        apiKey = key,
                         availableModels = models,
                         model = model,
                     )
@@ -1310,11 +1438,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         stopPolling()
         controller.cancelDiscovery()
+        // Последний шанс сохранить незаписанную поездку. viewModelScope уже отменяется,
+        // поэтому сохраняем синхронно — это teardown, IO короткий и разовый.
+        takeTripSnapshot()?.let { trip ->
+            runCatching { kotlinx.coroutines.runBlocking(Dispatchers.IO) { tripRepo.save(trip) } }
+        }
         transport?.close()
         ObdForegroundService.stop(getApplication())
     }
 
     companion object {
+        /**
+         * Чистая функция обрезки истории для модели (тестируется отдельно). Отрезает
+         * старое, но начинает с хода пользователя — иначе разрыв пары
+         * tool_use/tool_result вызовет 400 у провайдера. Если в хвостовом окне нет
+         * USER — расширяет назад до последнего USER; если USER нет вовсе — отдаёт
+         * историю целиком (не takeLast с разорванной парой tool_use/tool_result).
+         */
+        internal fun trimHistory(history: List<LlmMessage>, maxMsgs: Int): List<LlmMessage> {
+            if (history.size <= maxMsgs) return history
+            var start = history.size - maxMsgs
+            while (start < history.size && history[start].role != Role.USER) start++
+            if (start < history.size) return history.drop(start)
+            val lastUser = history.indexOfLast { it.role == Role.USER }
+            return if (lastUser >= 0) history.drop(lastUser) else history
+        }
+
         private const val TAG = "MainViewModel"
         private const val POLL_INTERVAL_MS = 1500L
         private const val POLL_IDLE_MS = 5000L

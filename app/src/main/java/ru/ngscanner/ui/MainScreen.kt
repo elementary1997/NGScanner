@@ -36,6 +36,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -86,10 +87,25 @@ fun MainScreen(vm: MainViewModel) {
     val tabStateHolder = rememberSaveableStateHolder()
 
     val permissions = bluetoothPermissions()
+    // Скан запускаем ПОСЛЕ ответа на запрос разрешений (в колбэке), а не синхронно
+    // рядом с launch() — иначе startDiscovery падал бы без BLUETOOTH_SCAN.
+    val scanRequested = remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { vm.refreshDevices() }
+    ) {
+        vm.refreshDevices()
+        if (scanRequested.value) vm.startScan()
+        scanRequested.value = false
+    }
     LaunchedEffect(Unit) { launcher.launch(permissions) }
+
+    // «Не гасить экран» при активной сессии с адаптером, если включено в настройках.
+    val keepScreenOn = ui.keepScreenOn && ui.connection != ConnectionState.Disconnected
+    val view = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(keepScreenOn) {
+        view.keepScreenOn = keepScreenOn
+        onDispose { view.keepScreenOn = false }
+    }
 
     Scaffold(
         topBar = {
@@ -172,7 +188,7 @@ fun MainScreen(vm: MainViewModel) {
                     Tab.Settings -> SettingsTab(
                         ui = ui,
                         vm = vm,
-                        onScan = { launcher.launch(permissions); vm.refreshDevices(); vm.startScan() },
+                        onScan = { scanRequested.value = true; launcher.launch(permissions) },
                         onStopScan = vm::stopScan,
                     )
                 }

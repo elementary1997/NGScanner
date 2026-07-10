@@ -20,11 +20,24 @@ class IsoTpTest {
         assertEquals("4902015854413231303939305931323334353637", IsoTp.reassemble(raw))
     }
 
-    // Сегменты в перепутанном порядке пересобираются по индексу.
+    // ELM327 печатает CAF-сегменты последовательно, поэтому склеиваем в порядке
+    // поступления. Сортировать по индексу нельзя: он одно-нибловый и после F
+    // оборачивается в 0 — на сообщении длиннее 16 сегментов сортировка переставила
+    // бы «обёрнутые» сегменты в начало и собрала данные неверно.
     @Test
-    fun colonSegmentsSortedByIndex() {
-        val raw = "008\r1:04050607\r0:00010203\r>"
-        assertEquals("0001020304050607", IsoTp.reassemble(raw))
+    fun colonSegmentsPreserveOrderPastSixteen() {
+        // 17 сегментов: индексы 0..F, затем снова 0 (счётчик обернулся). Данные
+        // каждого сегмента — его порядковый номер (00..10) в hex.
+        val sb = StringBuilder("011\r") // declared = 0x11 = 17 байт
+        val expected = StringBuilder()
+        for (n in 0 until 17) {
+            val idx = Integer.toHexString(n % 16)
+            val dataByte = "%02X".format(n)
+            sb.append(idx).append(':').append(dataByte).append('\r')
+            expected.append(dataByte)
+        }
+        sb.append('>')
+        assertEquals(expected.toString(), IsoTp.reassemble(sb.toString()))
     }
 
     // Сырые First/Consecutive Frame: PCI снимается, данные обрезаются по длине.

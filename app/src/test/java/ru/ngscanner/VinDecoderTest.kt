@@ -1,5 +1,6 @@
 package ru.ngscanner
 
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -38,5 +39,34 @@ class VinDecoderTest {
     fun nullOnInvalidYearCode() {
         // Символы 0, I, O, Q, U, Z не используются как код года (10-я позиция).
         assertNull(VinDecoder.yearFromVin("XTA2109900123456", currentYear = 2026))
+    }
+
+    // Офлайн-разбор VDS для АвтоВАЗ (WMI XTA). Эталонный VIN и ожидаемые
+    // значения взяты из тестов vininfo (BSD-3): VDS «GFK330» → Vesta, двиг. 21179.
+    // Ветка XTA возвращается офлайн, до обращения к сети, поэтому тест детерминирован.
+
+    @Test
+    fun decodesAvtoVazVestaFromVds() = runBlocking {
+        val info = VinDecoder.decode("XTAGFK330JY144213")!!
+        assertEquals("Lada", info.make)
+        assertEquals("Vesta", info.model)
+        assertEquals("21179", info.engine)
+    }
+
+    @Test
+    fun avtoVazUnknownModelStaysBlank() = runBlocking {
+        // Код модели вне таблицы (VDS[1] не A/F) → марка есть, модель и двигатель пусты.
+        val info = VinDecoder.decode("XTA21099031234567")!!
+        assertEquals("Lada", info.make)
+        assertEquals("", info.model)
+        assertNull(info.engine)
+    }
+
+    @Test
+    fun ruAssembledZWmiDecodesOfflineWithoutNetwork() = runBlocking {
+        // Z94 — Hyundai Solaris/Creta (сборка СПб). Раньше уходил в NHTSA (висел до 15 c);
+        // теперь марка определяется офлайн сразу, без обращения к сети.
+        val info = VinDecoder.decode("Z94CB41BABR000001")!!
+        assertEquals("Hyundai", info.make)
     }
 }

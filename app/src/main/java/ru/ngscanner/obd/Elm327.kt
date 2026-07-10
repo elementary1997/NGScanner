@@ -80,13 +80,38 @@ class Elm327(private val transport: ObdTransport) {
         transport.readResponse()
     }
 
-    /** Последовательность инициализации адаптера перед работой. */
+    /**
+     * Последовательность инициализации адаптера перед работой.
+     *
+     * Ответы больше не игнорируются: если адаптер вовсе не отвечает — это мёртвый
+     * или поддельный клон, и молча «успешная» инициализация обернулась бы неверной
+     * диагностикой. Отдельно ловим отказ от ATH1 (клон не показывает заголовки CAN):
+     * без заголовков кадры разных ЭБУ сливаются в фантомные коды — честнее сообщить.
+     */
     suspend fun initialize() = mutex.withLock {
         protocolNum = null
+        var sawResponse = false
+        var athRejected = false
         for (cmd in INIT_SEQUENCE) {
             transport.write(cmd)
-            transport.readResponse()
+            val resp = transport.readResponse().uppercase()
+            if (resp.isNotBlank()) sawResponse = true
+            // '?' — команда не распознана адаптером. Критично именно для ATH1.
+            if (cmd == "ATH1" && resp.contains('?')) athRejected = true
             delay(120)
+        }
+        // Проба живости: настоящий ELM327 на ATI возвращает строку с «ELM».
+        transport.write("ATI")
+        val id = transport.readResponse()
+        if (!sawResponse && !id.uppercase().contains("ELM")) {
+            throw ru.ngscanner.transport.ObdTransportException(
+                "Адаптер не отвечает — проверьте питание OBD-разъёма и соединение.",
+            )
+        }
+        if (athRejected) {
+            throw ru.ngscanner.transport.ObdTransportException(
+                "Адаптер не поддерживает показ заголовков (ATH1) — коды с такого клона недостоверны.",
+            )
         }
     }
 
@@ -109,7 +134,11 @@ class Elm327(private val transport: ObdTransport) {
     suspend fun readSupportedPids(): Set<String> {
         val supported = mutableSetOf<String>()
         for (base in listOf(0x00, 0x20, 0x40)) {
-            val nums = ObdParser.supportedPids(command("01" + "%02X".format(base)), base)
+            // Порядок важен: сначала запрос (первый 0100 запускает автоопределение
+            // протокола), затем headerHexLen() — тогда протокол уже определён и маски
+            // разных ЭБУ группируются по заголовку и объединяются.
+            val raw = command("01" + "%02X".format(base))
+            val nums = ObdParser.supportedPids(raw, base, headerHexLen())
             nums.forEach { supported.add("01" + "%02X".format(it)) }
         }
         return supported

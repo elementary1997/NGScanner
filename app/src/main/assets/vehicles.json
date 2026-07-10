@@ -2439,6 +2439,71 @@
      "1.5",
      "1.6"
     ]
+   },
+   {
+    "model": "Tiggo (T11)",
+    "ru": "Тигго (T11)",
+    "yearFrom": 2006,
+    "yearTo": 2016,
+    "engines": [
+     "1.6",
+     "1.8",
+     "2.0"
+    ]
+   },
+   {
+    "model": "Fora",
+    "ru": "Фора",
+    "yearFrom": 2006,
+    "yearTo": 2010,
+    "engines": [
+     "1.6",
+     "2.0"
+    ]
+   },
+   {
+    "model": "QQ",
+    "ru": "Кью-Кью",
+    "yearFrom": 2007,
+    "yearTo": 2013,
+    "engines": [
+     "1.1"
+    ]
+   },
+   {
+    "model": "Bonus (A13)",
+    "ru": "Бонус",
+    "yearFrom": 2011,
+    "yearTo": 2015,
+    "engines": [
+     "1.5"
+    ]
+   },
+   {
+    "model": "Kimo (A1)",
+    "ru": "Кимо",
+    "yearFrom": 2008,
+    "yearTo": 2013,
+    "engines": [
+     "1.3"
+    ]
+   },
+   {
+    "model": "Very",
+    "ru": "Вери",
+    "yearFrom": 2011,
+    "yearTo": 2014,
+    "engines": [
+     "1.5"
+    ]
+   },
+   {
+    "model": "M11 (A3)",
+    "yearFrom": 2010,
+    "yearTo": 2014,
+    "engines": [
+     "1.6"
+    ]
    }
   ]
  },
@@ -2494,6 +2559,43 @@
     "yearFrom": 2021,
     "engines": [
      "2.0 Turbo"
+    ]
+   },
+   {
+    "model": "MK",
+    "ru": "МК",
+    "yearFrom": 2008,
+    "yearTo": 2015,
+    "engines": [
+     "1.5",
+     "1.6"
+    ]
+   },
+   {
+    "model": "MK Cross",
+    "ru": "МК Кросс",
+    "yearFrom": 2010,
+    "yearTo": 2015,
+    "engines": [
+     "1.5"
+    ]
+   },
+   {
+    "model": "Emgrand EC7",
+    "ru": "Эмгранд EC7",
+    "yearFrom": 2011,
+    "yearTo": 2016,
+    "engines": [
+     "1.5",
+     "1.8"
+    ]
+   },
+   {
+    "model": "GC6",
+    "yearFrom": 2014,
+    "yearTo": 2016,
+    "engines": [
+     "1.5"
     ]
    }
   ]
@@ -2598,6 +2700,25 @@
     "engines": [
      "2.2",
      "2.3"
+    ]
+   },
+   {
+    "model": "Deer",
+    "ru": "Дир",
+    "yearFrom": 2003,
+    "yearTo": 2010,
+    "engines": [
+     "2.2"
+    ]
+   },
+   {
+    "model": "Wingle 5",
+    "ru": "Вингл 5",
+    "yearFrom": 2011,
+    "yearTo": 2016,
+    "engines": [
+     "2.0d",
+     "2.2"
     ]
    }
   ]
@@ -3602,6 +3723,23 @@
      "1.5",
      "1.6"
     ]
+   },
+   {
+    "model": "F0",
+    "yearFrom": 2008,
+    "yearTo": 2015,
+    "engines": [
+     "1.0"
+    ]
+   },
+   {
+    "model": "F6",
+    "yearFrom": 2007,
+    "yearTo": 2011,
+    "engines": [
+     "2.0",
+     "2.4"
+    ]
    }
   ]
  },
@@ -3764,6 +3902,35 @@
     "engines": [
      "1.5"
     ]
+   },
+   {
+    "model": "Breez (520)",
+    "ru": "Бриз",
+    "yearFrom": 2007,
+    "yearTo": 2012,
+    "engines": [
+     "1.3",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Solano (620)",
+    "ru": "Солано",
+    "yearFrom": 2010,
+    "yearTo": 2016,
+    "engines": [
+     "1.5",
+     "1.6"
+    ]
+   },
+   {
+    "model": "Smily (320)",
+    "ru": "Смайли",
+    "yearFrom": 2009,
+    "yearTo": 2016,
+    "engines": [
+     "1.3"
+    ]
    }
   ]
  },
@@ -3819,6 +3986,113 @@
     "yearFrom": 2016,
     "engines": [
      "2.0 Turbo"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Vortex",
+  "ru": "Вортекс",
+  "models": [
+   {
+    "model": "Tingo",
+    "ru": "Тинго",
+    "yearFrom": 2011,
+    "yearTo": 2014,
+    "engines": [
+     "1.8"
+    ]
+   },
+   {
+    "model": "Estina",
+    "ru": "Эстина",
+    "yearFrom": 2008,
+    "yearTo": 2012,
+    "engines": [
+     "1.6",
+     "2.0"
+    ]
+   },
+   {
+    "model": "Corda",
+    "ru": "Корда",
+    "yearFrom": 2009,
+    "yearTo": 2012,
+    "engines": [
+     "1.6"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "Brilliance",
+  "ru": "Бриллианс",
+  "models": [
+   {
+    "model": "V5",
+    "yearFrom": 2011,
+    "yearTo": 2015,
+    "engines": [
+     "1.6"
+    ]
+   },
+   {
+    "model": "H530",
+    "yearFrom": 2011,
+    "yearTo": 2015,
+    "engines": [
+     "1.5 Turbo"
+    ]
+   },
+   {
+    "model": "M2 (BS4)",
+    "yearFrom": 2007,
+    "yearTo": 2010,
+    "engines": [
+     "1.6"
+    ]
+   }
+  ]
+ },
+ {
+  "make": "ТагАЗ",
+  "ru": "ТагАЗ",
+  "models": [
+   {
+    "model": "Tager",
+    "ru": "Тагер",
+    "yearFrom": 2008,
+    "yearTo": 2013,
+    "engines": [
+     "2.3",
+     "3.2"
+    ]
+   },
+   {
+    "model": "Road Partner",
+    "ru": "Роуд Партнёр",
+    "yearFrom": 2008,
+    "yearTo": 2011,
+    "engines": [
+     "2.3"
+    ]
+   },
+   {
+    "model": "Vega (C100)",
+    "ru": "Вега",
+    "yearFrom": 2009,
+    "yearTo": 2010,
+    "engines": [
+     "1.6"
+    ]
+   },
+   {
+    "model": "Aquila (C190)",
+    "ru": "Аквила",
+    "yearFrom": 2011,
+    "yearTo": 2012,
+    "engines": [
+     "1.6"
     ]
    }
   ]

@@ -34,7 +34,15 @@ class ObdForegroundService : Service() {
         } else {
             0
         }
-        ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(name), type)
+        try {
+            ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(name), type)
+        } catch (_: Exception) {
+            // На Android 12+ старт FGS из фона может кинуть
+            // ForegroundServiceStartNotAllowedException, на 14+ при отозванном
+            // BT-разрешении — SecurityException. Не роняем процесс в момент старта
+            // сессии с адаптером: тихо останавливаем сервис (соединение живёт в ViewModel).
+            stopSelf()
+        }
         // Не sticky: соединение с адаптером живёт в ViewModel и при рестарте процесса
         // не восстанавливается. Sticky-перезапуск показал бы ложное «подключено».
         return START_NOT_STICKY

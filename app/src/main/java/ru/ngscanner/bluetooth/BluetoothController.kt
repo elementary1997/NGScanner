@@ -21,10 +21,19 @@ class BluetoothController(context: Context) {
     val isAvailable: Boolean get() = adapter != null
     val isEnabled: Boolean get() = adapter?.isEnabled == true
 
-    /** Сопряжённые устройства. Требует `BLUETOOTH_CONNECT` (запрашивается в UI). */
+    /**
+     * Сопряжённые устройства. Требует `BLUETOOTH_CONNECT` (запрашивается в UI).
+     * Весь вызов обёрнут в runCatching: если разрешение не выдано/отозвано,
+     * `adapter.bondedDevices` бросает SecurityException — возвращаем пустой список,
+     * а не роняем приложение.
+     */
     @SuppressLint("MissingPermission")
     fun bondedDevices(): List<BluetoothDevice> =
-        adapter?.bondedDevices?.sortedBy { runCatching { it.name }.getOrNull() ?: it.address }.orEmpty()
+        runCatching {
+            adapter?.bondedDevices
+                ?.sortedBy { d -> runCatching { d.name }.getOrNull() ?: d.address }
+                .orEmpty()
+        }.getOrDefault(emptyList())
 
     fun deviceByAddress(address: String): BluetoothDevice? =
         runCatching { adapter?.getRemoteDevice(address) }.getOrNull()
@@ -59,9 +68,18 @@ class BluetoothController(context: Context) {
             addAction(BluetoothDevice.ACTION_FOUND)
             addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         }
-        appContext.registerReceiver(r, filter)
-        if (a.isDiscovering) a.cancelDiscovery()
-        a.startDiscovery()
+        // Без BLUETOOTH_SCAN (Android 12+) или геолокации startDiscovery бросает
+        // SecurityException — не падаем, а честно завершаем поиск.
+        val started = runCatching {
+            appContext.registerReceiver(r, filter)
+            if (a.isDiscovering) a.cancelDiscovery()
+            a.startDiscovery()
+        }.isSuccess
+        if (!started) {
+            runCatching { appContext.unregisterReceiver(r) }
+            receiver = null
+            onFinished()
+        }
     }
 
     /** Останавливает поиск и снимает приёмник событий. */

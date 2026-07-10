@@ -13,6 +13,7 @@ class BleTransport(
 
     override val kind = TransportKind.BLE
 
+    @Volatile
     override var isConnected: Boolean = false
         private set
 

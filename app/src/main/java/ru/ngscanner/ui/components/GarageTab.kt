@@ -741,6 +741,19 @@ private fun AddByVinScreen(
                 style = MaterialTheme.typography.labelLarge,
                 color = cs.primary,
             )
+            // Модель из VIN не определилась, но в каталоге есть модели этой марки —
+            // предлагаем выбрать, а не печатать вручную (заодно подставляем двигатель).
+            if (info.model.isBlank() && ui.vinModelOptions.isNotEmpty()) {
+                val modelLabels = remember(ui.vinModelOptions) { ui.vinModelOptions.map { it.modelRu ?: it.model } }
+                var pickedModel by rememberSaveable(info) { mutableStateOf("") }
+                SimpleDropdown("Модель из каталога", modelLabels, pickedModel) { sel ->
+                    pickedModel = sel
+                    ui.vinModelOptions.firstOrNull { (it.modelRu ?: it.model) == sel }?.let { s ->
+                        model = s.modelRu ?: s.model
+                        if (engine.isBlank()) engine = s.engines.firstOrNull().orEmpty()
+                    }
+                }
+            }
             OutlinedTextField(
                 value = make,
                 onValueChange = { make = it },

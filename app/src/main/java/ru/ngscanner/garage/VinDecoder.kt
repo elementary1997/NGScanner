@@ -36,10 +36,20 @@ object VinDecoder {
     suspend fun decode(vin: String): VinInfo? = withContext(Dispatchers.IO) {
         val clean = vin.trim().uppercase()
         if (clean.length !in 11..17) return@withContext null
-        // Регион VIN «X» — Россия/СНГ. Такие авто американский сервис почти не знает,
-        // поэтому определяем марку офлайн по WMI и не обращаемся за границу.
-        if (clean.startsWith("X")) {
-            wmiMake(clean)?.let { return@withContext VinInfo(it, model = "", year = yearFromVin(clean)) }
+        // Российская/СНГ-сборка (WMI на «X», а также Z94/Z8N/Z6F/Z8T — Hyundai/Kia
+        // Solaris·Creta·Rio, Nissan Almera, Ford Focus, SsangYong): американский сервис
+        // их почти не знает, поэтому определяем офлайн (WMI + разбор VDS для ВАЗ) и НЕ
+        // идём в NHTSA — иначе самые частые машины вторички висят до 15 c на таймауте.
+        if (clean.startsWith("X") || clean.take(3) in RU_ASSEMBLED_Z_WMI) {
+            wmiMake(clean)?.let { make ->
+                val (vazModel, vazEngine) = avtoVazDetails(clean)
+                return@withContext VinInfo(
+                    make = make,
+                    model = vazModel.orEmpty(),
+                    year = yearFromVin(clean),
+                    engine = vazEngine,
+                )
+            }
         }
         // Иномарки — онлайн-сервис (полные данные: марка, модель, год).
         val online = runCatching { decodeOnline(clean) }.getOrNull()
@@ -72,6 +82,12 @@ object VinDecoder {
         }
     }
 
+    /**
+     * WMI на «Z», означающие сборку в РФ (в NHTSA их нет). Отдельно от «X»-региона,
+     * чтобы такие VIN шли офлайн, а не висели на онлайн-запросе к NHTSA.
+     */
+    private val RU_ASSEMBLED_Z_WMI = setOf("Z94", "Z8N", "Z6F", "Z8T")
+
     /** Марка по WMI (первые 3 символа VIN) — офлайн-таблица, упор на рынок РФ. */
     private fun wmiMake(vin: String): String? {
         if (vin.length < 3) return null
@@ -102,6 +118,43 @@ object VinDecoder {
         "LGW" to "Haval", "LGX" to "BYD", "LC0" to "BYD",
         "LS5" to "Changan", "LS4" to "Changan", "LJ1" to "JAC",
         "LFV" to "FAW", "LMG" to "GAC", "LFP" to "Lifan",
+    )
+
+    /**
+     * Офлайн-разбор VDS для АвтоВАЗ (WMI `XTA` — современные Lada: Vesta, XRAY):
+     * заводской код модели и двигателя прямо из VIN, без сети и NHTSA (который
+     * российские VIN почти не знает).
+     *
+     * Таблицы соответствий портированы из библиотеки vininfo (Igor Starikov,
+     * BSD-3-Clause, github.com/idlesign/vininfo, `details/avtovaz.py`) — это
+     * реальные заводские коды, а не эвристика. Поле заполняется только при
+     * совпадении кода: неизвестный код (модель вне таблицы — Granta, Priora и
+     * т.п.) оставляет поле пустым, ничего не выдумывая.
+     *
+     * Позиции VIN (0-based): VDS занимает символы 4–9. Модель — VDS[1] (поз. 5),
+     * двигатель — VDS[3] (поз. 7).
+     *
+     * @return пара «модель, двигатель»; любой элемент `null`, если код неизвестен.
+     */
+    private fun avtoVazDetails(vin: String): Pair<String?, String?> {
+        if (vin.length < 17 || !vin.startsWith("XTA")) return null to null
+        val vds = vin.substring(3, 9) // символы 4–9 (6 знаков)
+        return VAZ_MODEL[vds[1]] to VAZ_ENGINE[vds[3]]
+    }
+
+    /** Код модели ВАЗ — VDS[1]. Источник: vininfo `details/avtovaz.py` (BSD-3). */
+    private val VAZ_MODEL = mapOf(
+        'A' to "XRAY",
+        'F' to "Vesta",
+    )
+
+    /** Заводской индекс двигателя ВАЗ — VDS[3]. Источник: vininfo (BSD-3). */
+    private val VAZ_ENGINE = mapOf(
+        '1' to "21129",
+        '2' to "11189",
+        '3' to "21179",
+        '4' to "H4M",
+        'A' to "21129 CNG",
     )
 
     /**

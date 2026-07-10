@@ -43,6 +43,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -63,6 +64,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import ru.ngscanner.llm.LlmModel
 import ru.ngscanner.llm.ProviderId
+import ru.ngscanner.settings.AppSettings
 import ru.ngscanner.settings.ModelPrice
 import ru.ngscanner.settings.ModelUsage
 import ru.ngscanner.ui.ConnectionState
@@ -77,7 +79,9 @@ internal fun SettingsTab(
     onScan: () -> Unit,
     onStopScan: () -> Unit,
 ) {
-    var keyText by remember(ui.provider, ui.apiKey) { mutableStateOf(ui.apiKey) }
+    // Ключ не хранится в наблюдаемом состоянии — сеем поле разово из настроек
+    // (пересев при смене провайдера). Поле замаскировано (PasswordVisualTransformation).
+    var keyText by remember(ui.provider) { mutableStateOf(vm.currentApiKey()) }
     // Обновляем список сопряжённых устройств и состояние Bluetooth при открытии.
     LaunchedEffect(Unit) { vm.refreshDevices() }
     Column(
@@ -203,6 +207,22 @@ internal fun SettingsTab(
         }
 
         CollapsibleCard(
+            title = "Поведение",
+            summary = (if (ui.batteryGuard) "защита АКБ" else "без защиты АКБ") + " · " + pollRateLabel(ui.pollIntervalMs),
+            initiallyExpanded = false,
+        ) {
+            BehaviorContent(ui, vm)
+        }
+
+        CollapsibleCard(
+            title = "Обновление приложения",
+            summary = ui.updateInfo?.let { "доступна ${it.version}" } ?: "версия ${ui.appVersion}",
+            initiallyExpanded = ui.updateInfo != null,
+        ) {
+            UpdateContent(ui, vm)
+        }
+
+        CollapsibleCard(
             title = "Приватность и хранение",
             summary = if (ui.keysEncrypted) "ключ зашифрован · данные" else "⚠️ ключ без шифрования",
             initiallyExpanded = false,
@@ -210,6 +230,115 @@ internal fun SettingsTab(
             InfoContent(ui)
         }
     }
+}
+
+/** Секция «Поведение»: защита АКБ, экран, частота опроса. */
+@Composable
+private fun BehaviorContent(ui: UiState, vm: MainViewModel) {
+    val cs = MaterialTheme.colorScheme
+    SettingSwitchRow(
+        title = "Защита аккумулятора",
+        subtitle = "Отключать адаптер, если ЭБУ долго молчит (забытый в разъёме ELM327 сажает АКБ).",
+        checked = ui.batteryGuard,
+        onCheckedChange = vm::setBatteryGuard,
+    )
+    SettingSwitchRow(
+        title = "Не гасить экран",
+        subtitle = "Держать экран включённым во время сессии с адаптером.",
+        checked = ui.keepScreenOn,
+        onCheckedChange = vm::setKeepScreenOn,
+    )
+    Text("Частота опроса приборов", style = MaterialTheme.typography.labelLarge)
+    Text(
+        "Реже — меньше нагрузка на дешёвые клоны и экономнее для АКБ; чаще — живее графики.",
+        style = MaterialTheme.typography.bodySmall,
+        color = cs.onSurfaceVariant,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        PollChip("Экономно", AppSettings.POLL_MS_ECONOMY, ui.pollIntervalMs, vm::setPollIntervalMs)
+        PollChip("Обычно", AppSettings.DEFAULT_POLL_MS, ui.pollIntervalMs, vm::setPollIntervalMs)
+        PollChip("Быстро", AppSettings.POLL_MS_FAST, ui.pollIntervalMs, vm::setPollIntervalMs)
+    }
+}
+
+@Composable
+private fun PollChip(label: String, ms: Long, current: Long, onSelect: (Long) -> Unit) {
+    FilterChip(selected = current == ms, onClick = { onSelect(ms) }, label = { Text(label) })
+}
+
+@Composable
+private fun SettingSwitchRow(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/** Секция «Обновление приложения»: версия, проверка, установка из GitHub Releases. */
+@Composable
+private fun UpdateContent(ui: UiState, vm: MainViewModel) {
+    val cs = MaterialTheme.colorScheme
+    Text("Текущая версия: ${ui.appVersion}", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+    SettingSwitchRow(
+        title = "Проверять при запуске",
+        subtitle = "Уведомлять о новой версии из GitHub Releases.",
+        checked = ui.updateCheck,
+        onCheckedChange = vm::setUpdateCheck,
+    )
+    val info = ui.updateInfo
+    if (info != null) {
+        HorizontalDivider(color = cs.outlineVariant)
+        Text(
+            "Доступна версия ${info.version}",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = cs.primary,
+        )
+        if (info.notes.isNotBlank()) {
+            Text(info.notes.take(400), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        }
+        Button(
+            onClick = vm::installUpdate,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Icon(Icons.Rounded.OpenInNew, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Скачать и установить ${info.version}")
+        }
+        Text(
+            "Для установки поверх нужно разрешить «Установку неизвестных приложений» и тот же ключ подписи.",
+            style = MaterialTheme.typography.labelSmall,
+            color = cs.onSurfaceVariant,
+        )
+    } else {
+        OutlinedButton(
+            onClick = { vm.checkForUpdate(manual = true) },
+            enabled = !ui.updateChecking,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            if (ui.updateChecking) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Text("Проверить обновления")
+            }
+        }
+    }
+    ui.updateStatus?.let {
+        Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+    }
+}
+
+private fun pollRateLabel(ms: Long): String = when (ms) {
+    AppSettings.POLL_MS_ECONOMY -> "опрос: экономно"
+    AppSettings.POLL_MS_FAST -> "опрос: быстро"
+    else -> "опрос: обычно"
 }
 
 /**

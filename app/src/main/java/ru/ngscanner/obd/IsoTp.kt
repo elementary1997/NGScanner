@@ -55,14 +55,21 @@ object IsoTp {
         // --- Авто-форматирование (CAF): «NNN» (длина) + строки «i:данные». ---
         // Это один логический ответ (ELM собрал ISO-TP сам).
         if (lines.any { it.contains(':') }) {
+            // Сегменты CAF идут по порядку (ELM печатает их последовательно), поэтому
+            // склеиваем в порядке поступления и НЕ сортируем по индексу сегмента: он
+            // однонибловый и после F оборачивается в 0 — сортировка по числу переставила
+            // бы сегменты длинных (>16 сегментов, напр. Mode 09) сообщений неверно.
+            // Индекс используем лишь чтобы отсеять не-сегментные строки. Ограничение:
+            // при выключенных заголовках ответы нескольких ЭБУ в CAF неразличимы и
+            // склеятся — надёжная защита от этого держится на ATH1 (ветка выше).
             val segments = lines.mapNotNull { line ->
                 val colon = line.indexOf(':')
                 if (colon < 0) return@mapNotNull null
-                val idx = line.substring(0, colon).trim().toIntOrNull(16) ?: return@mapNotNull null
-                idx to hexOnly(line.substring(colon + 1))
-            }.sortedBy { it.first }
+                if (line.substring(0, colon).trim().toIntOrNull(16) == null) return@mapNotNull null
+                hexOnly(line.substring(colon + 1))
+            }
             if (segments.isEmpty()) return emptyList()
-            val joined = segments.joinToString("") { it.second }
+            val joined = segments.joinToString("")
             val declared = lines.firstOrNull { !it.contains(':') }?.trim()?.toIntOrNull(16)
             return listOfNotNull(trimTo(joined, declared).ifEmpty { null })
         }

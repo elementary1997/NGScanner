@@ -83,17 +83,40 @@ class ObdToolExecutor(
         "read_live_data" -> readLiveData(elm, call.argumentsJson)
         "monitor_pid" -> monitorPid(elm, call.argumentsJson)
         "clear_dtcs" ->
-            if (allowClearDtcs()) {
-                elm.command("04")
-                "Коды неисправностей сброшены (Mode 04)."
-            } else {
-                "Отклонено: сброс кодов требует явного подтверждения пользователя в приложении."
-            }
+            if (allowClearDtcs()) clearDtcs(elm)
+            else "Отклонено: сброс кодов требует явного подтверждения пользователя в приложении."
         else -> "Неизвестный инструмент: ${call.name}"
     }
 
+    /**
+     * Сброс кодов (Mode 04) с проверкой ответа ЭБУ. Раньше рапортовали успех
+     * безусловно — при обрыве связи это ложно сообщало «коды стёрты». Положительный
+     * ответ Mode 04 — байт `0x44`; ошибка шины / пустой ответ означают, что ЭБУ
+     * сброс не принял.
+     */
+    private suspend fun clearDtcs(elm: Elm327): String {
+        val resp = elm.command("04")
+        val upper = resp.uppercase()
+        val hex = upper.replace(Regex("[^0-9A-F]"), "")
+        return when {
+            "UNABLE TO CONNECT" in upper || "BUS INIT" in upper || "BUSINIT" in upper ||
+                "CAN ERROR" in upper || "BUS ERROR" in upper ->
+                "Сброс НЕ выполнен: нет связи с ЭБУ (ошибка шины). Коды НЕ стёрты — проверь " +
+                    "зажигание и разъём OBD, затем повтори."
+            "44" in hex ->
+                "Коды неисправностей сброшены (Mode 04). Check Engine погаснет, мониторы " +
+                    "готовности обнулены — до «наезда» циклов авто может не пройти инструментальный контроль."
+            else ->
+                "Сброс, похоже, НЕ принят ЭБУ (ответ: ${resp.trim().ifBlank { "пусто" }}). Коды могли " +
+                    "не стереться — повтори при исправной связи."
+        }
+    }
+
     private suspend fun formatDtcs(title: String, raw: String, isCan: Boolean, headerHexLen: Int, respHeader: String): String =
-        when (val result = ObdParser.parseDtcs(raw, isCan, headerHexLen, respHeader)) {
+        formatDtcResult(title, ObdParser.parseDtcs(raw, isCan, headerHexLen, respHeader))
+
+    private suspend fun formatDtcResult(title: String, result: ObdParser.DtcResult): String =
+        when (result) {
             is ObdParser.DtcResult.Ok -> if (result.codes.isEmpty()) {
                 "$title: не обнаружены."
             } else {
@@ -122,7 +145,18 @@ class ObdToolExecutor(
         if (pids.isEmpty()) return "Не указаны PID для чтения."
         val sb = StringBuilder()
         for (name in pids) {
-            sb.append(name).append(": ").append(readNamedPid(elm, name) ?: "нет данных").append('\n')
+            val pid = matchPid(name)
+            // Разделяем два исхода: неизвестное имя PID — это ошибка запроса, а не
+            // «датчик мёртв». Раньше оба давали «нет данных», и модель могла сделать
+            // ложный вывод об отсутствии параметра (канал галлюцинации). Чтение
+            // каждого PID изолируем runCatching — сбой одного не теряет остальные.
+            val line = when {
+                pid == null -> "неизвестный PID (нет в каталоге)"
+                else -> runCatching { elm.read(pid) }.getOrNull()
+                    ?.let { "${formatValue(it)} ${pid.unit}" }
+                    ?: "нет данных"
+            }
+            sb.append(name).append(": ").append(line).append('\n')
         }
         return sb.toString().trimEnd()
     }
@@ -135,17 +169,24 @@ class ObdToolExecutor(
     private suspend fun fullScan(elm: Elm327): String {
         val isCan = elm.isCan()
         val hl = elm.headerHexLen()
+        // Секции pending/permanent показываем, только если это НЕ «Ok без кодов» —
+        // решаем по структурному результату парсера, а не по подстроке в тексте
+        // (иначе правка формулировки в formatDtcResult молча ломала бы фильтр).
+        val pendingResult = ObdParser.parseDtcs(elm.command("07"), isCan, hl, "47")
+        val permanentResult = ObdParser.parseDtcs(elm.command("0A"), isCan, hl, "4A")
         return buildString {
             append(formatDtcs("Активные коды", elm.command("03"), isCan, hl, "43")).append("\n\n")
-            val pending = formatDtcs("Неподтверждённые коды", elm.command("07"), isCan, hl, "47")
-            if (!pending.contains("не обнаружены")) append(pending).append("\n\n")
-            val permanent = formatDtcs("Постоянные коды", elm.command("0A"), isCan, hl, "4A")
-            if (!permanent.contains("не обнаружены")) append(permanent).append("\n\n")
+            if (!isEmptyOk(pendingResult)) append(formatDtcResult("Неподтверждённые коды", pendingResult)).append("\n\n")
+            if (!isEmptyOk(permanentResult)) append(formatDtcResult("Постоянные коды", permanentResult)).append("\n\n")
             append(readReadiness(elm)).append("\n\n")
             append(readFreezeFrame(elm)).append("\n\n")
             append("Ключевые живые параметры:\n").append(keyLiveData(elm))
         }
     }
+
+    /** «ЭБУ ответил, кодов нет» — такую секцию в полном снимке скрываем. */
+    private fun isEmptyOk(r: ObdParser.DtcResult): Boolean =
+        r is ObdParser.DtcResult.Ok && r.codes.isEmpty()
 
     /** Ключевые для диагностики параметры разом; напряжение — через ATRV адаптера. */
     private suspend fun keyLiveData(elm: Elm327): String {
@@ -224,7 +265,11 @@ class ObdToolExecutor(
             elm.read(pid)?.let { samples.add(it) }
             delay(SAMPLE_INTERVAL_MS)
         }
-        if (samples.isEmpty()) return "$pidName: нет данных за ${duration} с."
+        // Фактическое окно замера, а не запрошенное: iterations коэрсится в [3,120],
+        // поэтому при duration=1 реальное окно ~1.2 c, а при duration>48 обрезано до ~48 c.
+        // Сообщать запрошенные секунды — искажать для модели «разброс за N секунд».
+        val actualSec = iterations * SAMPLE_INTERVAL_MS / 1000.0
+        if (samples.isEmpty()) return "$pidName: нет данных за ~${formatValue(actualSec)} с."
 
         val min = samples.min()
         val max = samples.max()
@@ -232,14 +277,8 @@ class ObdToolExecutor(
         val swing = max - min
         val threshold = if (pid == ObdPid.RPM) 150.0 else maxOf(2.0, kotlin.math.abs(avg) * 0.1)
         val note = if (swing > threshold) " — заметное плавание/нестабильность" else " — стабильно"
-        return "$pidName за ${duration} с (${samples.size} замеров): среднее ${formatValue(avg)}, " +
+        return "$pidName за ~${formatValue(actualSec)} с (${samples.size} замеров): среднее ${formatValue(avg)}, " +
             "мин ${formatValue(min)}, макс ${formatValue(max)}, разброс ${formatValue(swing)} ${pid.unit}$note"
-    }
-
-    private suspend fun readNamedPid(elm: Elm327, name: String): String? {
-        val pid = matchPid(name) ?: return null
-        val value = elm.read(pid) ?: return null
-        return "${formatValue(value)} ${pid.unit}"
     }
 
     private fun matchPid(name: String): ObdPid? {

@@ -21,8 +21,11 @@
     <!-- Foreground service — удержание соединения с адаптером во время сессии. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
-    <!-- Уведомление о foreground-сессии (Android 13+). -->
+    <!-- Уведомление о foreground-сессии и о новой версии (Android 13+). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Установка обновления приложения (скачанный APK из GitHub Releases). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-feature android:name="android.hardware.bluetooth" android:required="true" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />

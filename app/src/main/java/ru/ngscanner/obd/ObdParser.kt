@@ -80,9 +80,31 @@ object ObdParser {
             codes += parseDtcPayload(msg.substring(start + 2), isCan)
         }
         if (!sawHeader) {
+            // Положительного заголовка (43/47/4A) нет. Проверяем отрицательный ответ
+            // ЭБУ «7F <sid> <nrc>» — здесь это безопасно: раз 43 не найден, «7F03» не
+            // может быть байтами валидного кода. Матчим строго по коду режима.
+            negativeResponse(normalize(raw), respHeader)?.let { return DtcResult.Unknown(it) }
             return if (normalize(raw).isBlank()) DtcResult.NoData else DtcResult.Unknown(raw.trim())
         }
         return DtcResult.Ok(codes.distinct())
+    }
+
+    /**
+     * Расшифровка отрицательного ответа ЭБУ «7F <sid> <nrc>» для данного режима
+     * (03→7F03, 07→7F07, 0A→7F0A). `null`, если это не негативный ответ на режим.
+     */
+    private fun negativeResponse(hex: String, respHeader: String): String? {
+        val reqMode = when (respHeader) { "43" -> "03"; "47" -> "07"; "4A" -> "0A"; else -> return null }
+        val m = Regex("7F$reqMode([0-9A-F]{2})").find(hex) ?: return null
+        val text = when (m.groupValues[1]) {
+            "11" -> "режим не поддерживается ЭБУ"
+            "12" -> "подфункция не поддерживается"
+            "22" -> "условия запроса не выполнены"
+            "31" -> "запрос вне диапазона"
+            "78" -> "ЭБУ занят (ответ отложен)"
+            else -> "отказ ЭБУ (NRC 0x${m.groupValues[1]})"
+        }
+        return "Отрицательный ответ ЭБУ: $text"
     }
 
     private fun parseDtcPayload(payload: String, isCan: Boolean): List<String> =
@@ -287,12 +309,29 @@ object ObdParser {
      * Номера поддерживаемых PID из ответа на маску 0100/0120/0140.
      * Ответ — 4 байта (32 бита): старший бит соответствует `base + 1`.
      * Например для 0100 бит 31 → PID 0x01, бит 0 → PID 0x20.
+     *
+     * На CAN на маску могут ответить несколько ЭБУ (двигатель `7E8`, АКПП `7E9`…),
+     * каждый своей битовой маской. Объединяем биты по ИЛИ по всем ЭБУ — иначе PID-ы,
+     * поддерживаемые только вторичным модулем, потерялись бы и их приборы скрылись
+     * с дашборда. Для live-значений хватает первого ЭБУ, но маску поддержки надо
+     * агрегировать (см. также parseReadiness).
      */
-    fun supportedPids(raw: String, base: Int): List<Int> {
-        val data = dataBytes(raw, "01" + "%02X".format(base)) ?: return emptyList()
-        if (data.size < 4) return emptyList()
-        val bits = (data[0].toLong() shl 24) or (data[1].toLong() shl 16) or
-            (data[2].toLong() shl 8) or data[3].toLong()
+    fun supportedPids(raw: String, base: Int, headerHexLen: Int = 0): List<Int> {
+        val prefix = "41" + "%02X".format(base)
+        val messages = IsoTp.messages(raw, headerHexLen).filter { it.contains(prefix) }
+            .ifEmpty { normalize(raw).takeIf { it.contains(prefix) }?.let { listOf(it) } ?: emptyList() }
+        var bits = 0L
+        for (msg in messages) {
+            val idx = msg.indexOf(prefix)
+            if (idx < 0) continue
+            val bytes = msg.substring(idx + prefix.length).chunked(2)
+                .filter { it.length == 2 }
+                .mapNotNull { runCatching { it.toInt(16) }.getOrNull() }
+            if (bytes.size < 4) continue
+            bits = bits or ((bytes[0].toLong() shl 24) or (bytes[1].toLong() shl 16) or
+                (bytes[2].toLong() shl 8) or bytes[3].toLong())
+        }
+        if (bits == 0L) return emptyList()
         val result = mutableListOf<Int>()
         for (i in 0 until 32) {
             if ((bits shr (31 - i)) and 1L == 1L) result.add(base + i + 1)

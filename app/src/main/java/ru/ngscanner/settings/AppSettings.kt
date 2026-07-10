@@ -57,6 +57,34 @@ class AppSettings(context: Context) {
             ?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
         set(value) { runCatching { prefs.edit().putString(KEY_GRAPH_PIDS, value.joinToString(",")).apply() } }
 
+    /**
+     * Авто-отключение адаптера, если ЭБУ долго молчит (защита АКБ от разряда
+     * забытым в разъёме ELM327). По умолчанию включено; можно выключить для
+     * длительного мониторинга на заведённом двигателе.
+     */
+    var batteryGuard: Boolean
+        get() = runCatching { prefs.getBoolean(KEY_BATTERY_GUARD, true) }.getOrDefault(true)
+        set(value) { runCatching { prefs.edit().putBoolean(KEY_BATTERY_GUARD, value).apply() } }
+
+    /** Не гасить экран во время активной сессии с адаптером (удобно при диагностике). */
+    var keepScreenOn: Boolean
+        get() = runCatching { prefs.getBoolean(KEY_KEEP_SCREEN, true) }.getOrDefault(true)
+        set(value) { runCatching { prefs.edit().putBoolean(KEY_KEEP_SCREEN, value).apply() } }
+
+    /** Проверять новую версию приложения при запуске и уведомлять о ней. */
+    var updateCheck: Boolean
+        get() = runCatching { prefs.getBoolean(KEY_UPDATE_CHECK, true) }.getOrDefault(true)
+        set(value) { runCatching { prefs.edit().putBoolean(KEY_UPDATE_CHECK, value).apply() } }
+
+    /**
+     * Частота опроса приборов. Медленнее = меньше нагрузка на дешёвые клоны ELM327
+     * (реже теряют кадры) и экономнее для АКБ; быстрее = живее графики. Значение —
+     * базовый интервал в мс между циклами опроса.
+     */
+    var pollIntervalMs: Long
+        get() = runCatching { prefs.getLong(KEY_POLL_INTERVAL, DEFAULT_POLL_MS) }.getOrDefault(DEFAULT_POLL_MS)
+        set(value) { runCatching { prefs.edit().putLong(KEY_POLL_INTERVAL, value).apply() } }
+
     fun apiKey(p: ProviderId): String =
         runCatching { prefs.getString(keyFor(p), "") }.getOrNull().orEmpty()
 
@@ -112,6 +140,15 @@ class AppSettings(context: Context) {
         private const val KEY_PROVIDER = "provider"
         private const val KEY_MODEL = "model"
         private const val KEY_GRAPH_PIDS = "graph_pids"
+        private const val KEY_BATTERY_GUARD = "battery_guard"
+        private const val KEY_KEEP_SCREEN = "keep_screen_on"
+        private const val KEY_UPDATE_CHECK = "update_check"
+        private const val KEY_POLL_INTERVAL = "poll_interval_ms"
         const val DEFAULT_MODEL = "claude-opus-4-8"
+
+        /** Базовый интервал опроса приборов (мс) — «обычный» режим. */
+        const val DEFAULT_POLL_MS = 1500L
+        const val POLL_MS_ECONOMY = 3000L
+        const val POLL_MS_FAST = 800L
     }
 }

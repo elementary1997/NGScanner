@@ -13,9 +13,10 @@ import kotlinx.serialization.json.Json
  * в цилиндре 1»). Файл читается один раз и кэшируется в памяти процесса;
  * ввод-вывод и парсинг выполняются на [Dispatchers.IO].
  *
- * В словаре — только generic-коды (P0xxx, U0xxx, распространённые P2xxx) и
- * несколько кодов производителя. Незнакомый код возвращает `null`: выдумывать
- * расшифровку нельзя (см. AGENTS.md, раздел «Границы и безопасность»).
+ * В словаре — только generic-коды (P0xxx, U0xxx, распространённые P2xxx) плюс
+ * P1000 (статус готовности мониторов); mfr-специфичные P1xxx, а также B/C-коды
+ * пока не входят. Незнакомый код возвращает `null`: выдумывать расшифровку нельзя
+ * (см. AGENTS.md, раздел «Границы и безопасность»).
  */
 object DtcDatabase {
 
@@ -52,10 +53,17 @@ object DtcDatabase {
      * Регистр и обрамляющие пробелы во входной строке не важны: « p0301 »
      * найдёт «P0301».
      */
-    suspend fun describe(context: Context, code: String): String? {
+    suspend fun describe(context: Context, code: String): String? =
+        describeIn(load(context), code)
+
+    /**
+     * Чистый поиск кода в готовой карте (тестируется без Context). Регистр и
+     * обрамляющие пробелы не важны. Незнакомый код → `null` (не выдумываем).
+     */
+    internal fun describeIn(map: Map<String, String>, code: String): String? {
         val normalized = code.trim().uppercase()
         if (normalized.isEmpty()) return null
-        return load(context)[normalized]
+        return map[normalized]
     }
 
     private const val ASSET_NAME = "dtc.json"

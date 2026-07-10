@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.io.InputStream
@@ -25,6 +26,9 @@ class ClassicSppTransport(
 
     override val kind = TransportKind.CLASSIC_SPP
 
+    // @Volatile: пишется из IO-потока (connect/write/read), читается из UI —
+    // без него возможна устаревшая видимость состояния соединения.
+    @Volatile
     override var isConnected: Boolean = false
         private set
 
@@ -38,13 +42,23 @@ class ClassicSppTransport(
     override suspend fun connect() {
         withContext(Dispatchers.IO) {
             try {
+                val primary = device.createRfcommSocketToServiceRecord(sppUuid)
                 val s = try {
-                    device.createRfcommSocketToServiceRecord(sppUuid).apply { connect() }
+                    primary.apply { connect() }
                 } catch (_: Exception) {
-                    // Резервный путь для «капризных» клонов, не отдающих SPP-запись.
-                    (device.javaClass
+                    // Первый сокет уже держит нативный дескриптор — закрываем его перед
+                    // резервным путём, иначе при повторных попытках к «капризному»
+                    // клону файловые дескрипторы утекают.
+                    runCatching { primary.close() }
+                    val fallback = device.javaClass
                         .getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
-                        .invoke(device, 1) as BluetoothSocket).apply { connect() }
+                        .invoke(device, 1) as BluetoothSocket
+                    try {
+                        fallback.apply { connect() }
+                    } catch (e: Exception) {
+                        runCatching { fallback.close() }
+                        throw e
+                    }
                 }
                 socket = s
                 input = s.inputStream
@@ -60,6 +74,11 @@ class ClassicSppTransport(
     override suspend fun write(command: String) {
         withContext(Dispatchers.IO) {
             val out = output ?: throw ObdTransportException("Нет активного соединения")
+            // Дренируем «хвост» предыдущего ответа: если прошлый readResponse вышел по
+            // таймауту, не дочитав приглашение '>', его остаток (и само '>') остаётся в
+            // буфере. Без очистки следующая команда прочитала бы чужой ответ — и
+            // соответствие запрос→ответ сдвинулось бы навсегда (frame desync).
+            drainInput()
             try {
                 out.write((command + "\r").toByteArray())
                 out.flush()
@@ -70,12 +89,21 @@ class ClassicSppTransport(
         }
     }
 
+    /** Сбрасывает залежавшиеся во входном буфере байты (хвост прошлого ответа). */
+    private fun drainInput() {
+        val inp = input ?: return
+        runCatching { while (inp.available() > 0) { if (inp.read() == -1) break } }
+    }
+
     override suspend fun readResponse(timeoutMs: Long): String = withContext(Dispatchers.IO) {
         val inp = input ?: throw ObdTransportException("Нет активного соединения")
         val sb = StringBuilder()
         val deadline = System.currentTimeMillis() + timeoutMs
         try {
             while (System.currentTimeMillis() < deadline) {
+                // Уважать отмену корутины даже при непрерывном потоке байт от клона
+                // (иначе пауза опроса под диалог агента висела бы до таймаута).
+                ensureActive()
                 if (inp.available() > 0) {
                     val c = inp.read()
                     if (c == -1) break

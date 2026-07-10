@@ -67,7 +67,23 @@ class DiagnosticAgent(
                 }
             }
         }
-        onEvent(AgentEvent.Assistant("Достигнут лимит шагов диагностики — прерываю."))
+        // Достигнут лимит шагов: даём модели финальный ход БЕЗ инструментов, чтобы она
+        // подвела вердикт по уже собранным данным. Иначе история заканчивалась бы на
+        // tool_result без ответного assistant — для Anthropic это некорректная
+        // последовательность (риск 400 на следующем запросе), а пользователь так и не
+        // получал бы структурный вердикт.
+        val finalText = runCatching {
+            val closing = provider.send(LlmRequest(model, system, messages, emptyList()))
+            closing.usage?.let { u -> onEvent(AgentEvent.Usage(u.prompt, u.completion)) }
+            when (closing) {
+                is LlmResponse.Final -> closing.text
+                is LlmResponse.ToolUse -> closing.text ?: ""
+            }
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: "Достигнут лимит шагов диагностики. Однозначный вердикт по собранным данным " +
+            "не сформирован — уточни симптом или повтори диагностику."
+        messages.add(LlmMessage(Role.ASSISTANT, content = finalText))
+        onEvent(AgentEvent.Assistant(finalText))
         return messages
     }
 

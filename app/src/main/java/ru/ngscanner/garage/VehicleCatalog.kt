@@ -85,6 +85,14 @@ object VehicleCatalog {
     private var cache: List<VehicleMake>? = null
 
     /**
+     * Предпосчитанный плоский индекс: подсказка + её строка для поиска. Считается
+     * один раз (справочник неизменен), чтобы `search` не пересобирал 350+ объектов и
+     * не строил searchText на каждый запрос.
+     */
+    @Volatile
+    private var indexed: List<Pair<VehicleSuggestion, String>>? = null
+
+    /**
      * Загружает справочник (один раз) и возвращает список марок.
      *
      * Повторные вызовы отдают кэш без обращения к диску.
@@ -117,17 +125,15 @@ object VehicleCatalog {
         query: String,
         limit: Int = 20,
     ): List<VehicleSuggestion> {
-        val makes = load(context)
-        val all = flatten(makes)
+        val all = index(context)
 
         val tokens = query.lowercase().trim().split(WHITESPACE).filter { it.isNotEmpty() }
         if (tokens.isEmpty()) {
-            return all.take(limit)
+            return all.take(limit).map { it.first }
         }
 
         val scored = ArrayList<Pair<VehicleSuggestion, Int>>()
-        for (suggestion in all) {
-            val haystack = suggestion.searchText
+        for ((suggestion, haystack) in all) {
             val score = scoreOrNull(haystack, tokens) ?: continue
             scored.add(suggestion to score)
         }
@@ -135,6 +141,38 @@ object VehicleCatalog {
         // внутри одинаковых очков сохраняется из исходного справочника.
         scored.sortByDescending { it.second }
         return scored.take(limit).map { it.first }
+    }
+
+    /** Плоский индекс (подсказка + строка поиска); считается один раз и кэшируется. */
+    private suspend fun index(context: Context): List<Pair<VehicleSuggestion, String>> {
+        indexed?.let { return it }
+        return withContext(Dispatchers.IO) {
+            indexed?.let { return@withContext it }
+            val idx = flatten(load(context)).map { it to it.searchText }
+            indexed = idx
+            idx
+        }
+    }
+
+    /**
+     * Модели указанной марки — для подсказки, когда VIN дал марку, но не модель
+     * (частый случай для РФ). Сопоставление по латинскому И русскому имени марки
+     * без учёта регистра: из VIN марка приходит то латиницей («Lada», «Hyundai»),
+     * то кириллицей («УАЗ», «ГАЗ»).
+     */
+    suspend fun modelsForMake(context: Context, make: String): List<VehicleSuggestion> {
+        val target = make.trim().lowercase()
+        if (target.isEmpty()) return emptyList()
+        val m = load(context).firstOrNull {
+            it.make.lowercase() == target || it.ru?.lowercase() == target
+        } ?: return emptyList()
+        return m.models.map { model ->
+            VehicleSuggestion(
+                make = m.make, model = model.model, makeRu = m.ru, modelRu = model.ru,
+                generation = model.generation, yearFrom = model.yearFrom, yearTo = model.yearTo,
+                engines = model.engines,
+            )
+        }
     }
 
     /** Разворачивает марки в плоский список подсказок «одна модель = одна строка». */
@@ -167,9 +205,19 @@ object VehicleCatalog {
     private fun scoreOrNull(haystack: String, tokens: List<String>): Int? {
         var score = 0
         for (token in tokens) {
-            val index = haystack.indexOf(token)
+            // Проверяем ВСЕ вхождения токена: если хоть одно на границе слова —
+            // начисляем бонус. Первое вхождение может быть в середине слова, а
+            // релевантное — в начале другого (иначе подсказка ранжируется ниже).
+            var index = haystack.indexOf(token)
             if (index < 0) return null
-            val atWordStart = index == 0 || haystack[index - 1] == ' '
+            var atWordStart = false
+            while (index >= 0) {
+                if (index == 0 || haystack[index - 1] == ' ') {
+                    atWordStart = true
+                    break
+                }
+                index = haystack.indexOf(token, index + 1)
+            }
             score += if (atWordStart) 2 else 1
         }
         return score
