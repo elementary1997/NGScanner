@@ -35,20 +35,25 @@ jobs:
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
 
-      # --- Подпись релиза, если заданы секреты репозитория ---
-      # RELEASE_KEYSTORE_B64  — keystore (base64)
-      # RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD
-      - name: Decode signing keystore
-        id: keystore
-        if: ${{ secrets.RELEASE_KEYSTORE_B64 != '' }}
+      # Секрет нельзя использовать в if:, поэтому наличие keystore определяем в
+      # shell-шаге (секрет — через env, это разрешено) и отдаём как output.
+      - name: Prepare signing
+        id: sign
+        env:
+          KS_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
         run: |
-          echo "${{ secrets.RELEASE_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
-          echo "path=$RUNNER_TEMP/release.jks" >> "$GITHUB_OUTPUT"
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "has_keystore=true" >> "$GITHUB_OUTPUT"
+            echo "path=$RUNNER_TEMP/release.jks" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_keystore=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build signed release APK
-        if: ${{ secrets.RELEASE_KEYSTORE_B64 != '' }}
+        if: steps.sign.outputs.has_keystore == 'true'
         env:
-          RELEASE_KEYSTORE: ${{ steps.keystore.outputs.path }}
+          RELEASE_KEYSTORE: ${{ steps.sign.outputs.path }}
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
@@ -57,7 +62,7 @@ jobs:
       # Фолбэк, пока секреты подписи не заданы: debug-APK (для «install over»
       # нужна консистентная подпись — задайте секреты и пересоберите релиз).
       - name: Build debug APK (no signing secrets)
-        if: ${{ secrets.RELEASE_KEYSTORE_B64 == '' }}
+        if: steps.sign.outputs.has_keystore != 'true'
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Collect APK
