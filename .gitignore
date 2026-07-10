@@ -26,7 +26,11 @@ captures/
 # Kotlin
 .kotlin/
 
-# Secrets — never commit API keys
+# Secrets — never commit API keys / ключи подписи
 secrets.properties
 *.env
 !.env.example
+# Keystore подписи релиза — только через секреты CI, НИКОГДА в репозиторий
+*.jks
+keystore.properties
+ngscanner-release-secrets.txt
