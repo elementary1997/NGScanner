@@ -69,6 +69,7 @@ internal fun DevicesTab(
     onRequestNorm: (ObdPid) -> Unit,
     onOpenConnection: () -> Unit,
     onSetGraphPids: (List<String>) -> Unit,
+    onSetDashboardPids: (List<String>) -> Unit,
     onRefreshTrips: () -> Unit,
     onDeleteTrip: (String) -> Unit,
     onExportTrip: (String) -> Unit,
@@ -144,6 +145,7 @@ internal fun DevicesTab(
                 graphOverlays = pids.drop(1).map { it.name }.toSet()
             },
             onSetGraphPids = onSetGraphPids,
+            onSetDashboardPids = onSetDashboardPids,
             onOpenTrips = { showTrips = true },
             onOpenDtc = { showDtc = true },
         )
@@ -179,6 +181,7 @@ private fun DevicesConnected(
     onOpenGraph: (ObdPid) -> Unit,
     onOpenCombo: (List<ObdPid>) -> Unit,
     onSetGraphPids: (List<String>) -> Unit,
+    onSetDashboardPids: (List<String>) -> Unit,
     onOpenTrips: () -> Unit,
     onOpenDtc: () -> Unit,
 ) {
@@ -200,7 +203,7 @@ private fun DevicesConnected(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     Spacer(Modifier.height(4.dp))
-                    Dashboard(ui.metrics, ui.history, ui.supportedPids, onDisconnect, onOpenGraph, onOpenDtc)
+                    Dashboard(ui.metrics, ui.history, ui.supportedPids, ui.dashboardPids, onDisconnect, onOpenGraph, onOpenDtc, onSetDashboardPids)
                     ui.error?.let { ErrorCard(it) }
                     Spacer(Modifier.height(16.dp))
                 }

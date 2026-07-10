@@ -69,9 +69,21 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -87,9 +99,11 @@ internal fun Dashboard(
     metrics: Map<ObdPid, Double>,
     history: Map<ObdPid, List<MetricSample>>,
     supportedPids: Set<String>,
+    dashboardPids: List<String>,
     onDisconnect: () -> Unit,
     onOpenGraph: (ObdPid) -> Unit,
     onOpenDtc: () -> Unit,
+    onSetDashboardPids: (List<String>) -> Unit,
 ) {
     // Тап по прибору открывает полноэкранный график — навигация живёт в DevicesTab
     // (график заменяет весь экран, а не вкладывается в скролл дашборда).
@@ -97,23 +111,58 @@ internal fun Dashboard(
     // Показываем только параметры, которые ЭБУ реально поддерживает (по 0100/0120/0140);
     // если определить не удалось (пусто) — показываем все, как раньше.
     fun shown(pid: ObdPid) = supportedPids.isEmpty() || pid.cmd in supportedPids
+    var showConfig by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-            CircularGauge(ObdPid.RPM, metrics[ObdPid.RPM], onTap, Modifier.weight(1f))
-            CircularGauge(ObdPid.COOLANT, metrics[ObdPid.COOLANT], onTap, Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = { showConfig = true }) {
+                Icon(Icons.Rounded.Tune, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Настроить")
+            }
         }
-        MetricsSection("Двигатель", listOf(ObdPid.ENGINE_LOAD, ObdPid.TIMING, ObdPid.SPEED).filter(::shown), metrics, history, onTap)
-        MetricsSection(
-            "Впуск / Топливо",
-            listOf(
-                ObdPid.THROTTLE, ObdPid.MAF, ObdPid.MAP, ObdPid.INTAKE_TEMP,
-                ObdPid.STFT, ObdPid.LTFT, ObdPid.O2_LAMBDA, ObdPid.FUEL_LEVEL,
-            ).filter(::shown),
-            metrics,
-            history,
-            onTap,
-        )
-        MetricsSection("Электрика", listOf(ObdPid.VOLTAGE).filter(::shown), metrics, history, onTap)
+        if (dashboardPids.isEmpty()) {
+            // Дефолтная раскладка: круговые гейджи + сгруппированные приборы.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(13.dp)) {
+                CircularGauge(ObdPid.RPM, metrics[ObdPid.RPM], onTap, Modifier.weight(1f))
+                CircularGauge(ObdPid.COOLANT, metrics[ObdPid.COOLANT], onTap, Modifier.weight(1f))
+            }
+            MetricsSection("Двигатель", listOf(ObdPid.ENGINE_LOAD, ObdPid.TIMING, ObdPid.SPEED).filter(::shown), metrics, history, onTap)
+            MetricsSection(
+                "Впуск / Топливо",
+                listOf(
+                    ObdPid.THROTTLE, ObdPid.MAF, ObdPid.MAP, ObdPid.INTAKE_TEMP,
+                    ObdPid.STFT, ObdPid.LTFT, ObdPid.O2_LAMBDA, ObdPid.FUEL_LEVEL,
+                ).filter(::shown),
+                metrics,
+                history,
+                onTap,
+            )
+            MetricsSection("Электрика", listOf(ObdPid.VOLTAGE).filter(::shown), metrics, history, onTap)
+        } else {
+            // Кастомная раскладка: выбранные PID сеткой в заданном пользователем порядке.
+            val ordered = DashboardLayout.resolve(dashboardPids, supportedPids)
+            if (ordered.isEmpty()) {
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "Выбранные параметры не поддерживаются этим ЭБУ. Измените набор кнопкой «Настроить».",
+                        Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                    ordered.chunked(2).forEach { rowPids ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+                            rowPids.forEach { pid ->
+                                MetricCard(pid, metrics[pid], history[pid].orEmpty(), onTap, Modifier.weight(1f))
+                            }
+                            if (rowPids.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
         FilledTonalButton(
             onClick = onOpenDtc,
             modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -133,6 +182,69 @@ internal fun Dashboard(
             Text("Отключить")
         }
     }
+    if (showConfig) {
+        DashboardPidsDialog(
+            current = dashboardPids,
+            onDismiss = { showConfig = false },
+            onSave = { showConfig = false; onSetDashboardPids(it) },
+        )
+    }
+}
+
+/**
+ * Диалог настройки дашборда: выбор приборов (Checkbox) и их порядок (стрелки вверх/вниз).
+ * «Сбросить» → пустой список (дефолтная раскладка). «Выбраны все» НЕ схлопываем в пустой —
+ * иначе потерялся бы заданный порядок.
+ */
+@Composable
+private fun DashboardPidsDialog(
+    current: List<String>,
+    onDismiss: () -> Unit,
+    onSave: (List<String>) -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val selected = remember { mutableStateListOf<String>().apply { addAll(current) } }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = { onSave(selected.toList()) }) { Text("Готово") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onSave(emptyList()) }) { Text("Сбросить") }
+                TextButton(onClick = onDismiss) { Text("Отмена") }
+            }
+        },
+        title = { Text("Приборы дашборда") },
+        text = {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                if (selected.isNotEmpty()) {
+                    Text("Показывать (порядок):", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                    selected.toList().forEachIndexed { index, name ->
+                        val pid = ObdPid.entries.firstOrNull { it.name == name }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = true, onCheckedChange = { selected.remove(name) })
+                            Text(pid?.label ?: name, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                            IconButton(
+                                onClick = { if (index > 0) { val t = selected[index - 1]; selected[index - 1] = selected[index]; selected[index] = t } },
+                                enabled = index > 0,
+                            ) { Icon(Icons.Rounded.KeyboardArrowUp, "выше") }
+                            IconButton(
+                                onClick = { if (index < selected.size - 1) { val t = selected[index + 1]; selected[index + 1] = selected[index]; selected[index] = t } },
+                                enabled = index < selected.size - 1,
+                            ) { Icon(Icons.Rounded.KeyboardArrowDown, "ниже") }
+                        }
+                    }
+                    HorizontalDivider(color = cs.outlineVariant, modifier = Modifier.padding(vertical = 8.dp))
+                }
+                Text("Добавить:", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                ObdPid.entries.filter { it.name !in selected }.forEach { pid ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = false, onCheckedChange = { if (it) selected.add(pid.name) })
+                        Text(pid.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        },
+    )
 }
 
 @Composable

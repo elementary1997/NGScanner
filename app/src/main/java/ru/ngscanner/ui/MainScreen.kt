@@ -165,6 +165,7 @@ fun MainScreen(vm: MainViewModel) {
                         onRequestNorm = vm::requestNorm,
                         onOpenConnection = { goToTab(Tab.Settings) },
                         onSetGraphPids = vm::setGraphPids,
+                        onSetDashboardPids = vm::setDashboardPids,
                         onRefreshTrips = vm::refreshTrips,
                         onDeleteTrip = vm::deleteTrip,
                         onExportTrip = vm::exportTripCsv,

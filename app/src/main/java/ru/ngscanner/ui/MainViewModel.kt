@@ -124,6 +124,8 @@ data class UiState(
     val tripMetas: List<TripMeta> = emptyList(),
     // выбранные для панели графиков PID (пусто = показывать все с историей)
     val graphPids: List<String> = emptyList(),
+    // Выбор и порядок PID для дашборда (пустой = дефолтная раскладка).
+    val dashboardPids: List<String> = emptyList(),
     val error: String? = null,
     // диагностика / чат с LLM
     val chat: List<ChatMessage> = emptyList(),
@@ -194,6 +196,7 @@ private class LoadedState(
     val modelPrices: Map<String, ModelPrice>,
     val history: List<LlmMessage>,
     val graphPids: List<String>,
+    val dashboardPids: List<String>,
     val tripMetas: List<TripMeta>,
     val batteryGuard: Boolean,
     val keepScreenOn: Boolean,
@@ -263,6 +266,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     modelPrices = usageRepo.prices(),
                     history = chatRepo.loadHistory(),
                     graphPids = settings.graphPids,
+                    dashboardPids = settings.dashboardPids,
                     tripMetas = tripRepo.metas(),
                     batteryGuard = settings.batteryGuard,
                     keepScreenOn = settings.keepScreenOn,
@@ -299,6 +303,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     keysEncrypted = loaded.keysEncrypted, // не редактируется пользователем
                     favorites = if (cur.favorites == empty.favorites) loaded.favorites else cur.favorites,
                     graphPids = if (cur.graphPids == empty.graphPids) loaded.graphPids else cur.graphPids,
+                    dashboardPids = if (cur.dashboardPids == empty.dashboardPids) loaded.dashboardPids else cur.dashboardPids,
                     tripMetas = if (cur.tripMetas == empty.tripMetas) loaded.tripMetas else cur.tripMetas,
                     // Настройки поведения и версия: тумблеры редко трогают за время загрузки,
                     // а сеттеры пишут и на диск, и в состояние — вливаем значения с диска.
@@ -618,6 +623,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setGraphPids(pids: List<String>) {
         settings.graphPids = pids
         _ui.update { it.copy(graphPids = pids) }
+    }
+
+    /** Набор и порядок PID для дашборда (пустой список = дефолтная раскладка). */
+    fun setDashboardPids(pids: List<String>) {
+        settings.dashboardPids = pids
+        _ui.update { it.copy(dashboardPids = pids) }
     }
 
     // ---- Настройки поведения ----

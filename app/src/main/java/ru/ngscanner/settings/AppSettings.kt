@@ -57,6 +57,12 @@ class AppSettings(context: Context) {
             ?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
         set(value) { runCatching { prefs.edit().putString(KEY_GRAPH_PIDS, value.joinToString(",")).apply() } }
 
+    /** Выбор и ПОРЯДОК PID для дашборда (пустой список = дефолтная раскладка). */
+    var dashboardPids: List<String>
+        get() = runCatching { prefs.getString(KEY_DASHBOARD_PIDS, "") }.getOrNull()
+            ?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+        set(value) { runCatching { prefs.edit().putString(KEY_DASHBOARD_PIDS, value.joinToString(",")).apply() } }
+
     /**
      * Авто-отключение адаптера, если ЭБУ долго молчит (защита АКБ от разряда
      * забытым в разъёме ELM327). По умолчанию включено; можно выключить для
@@ -140,6 +146,7 @@ class AppSettings(context: Context) {
         private const val KEY_PROVIDER = "provider"
         private const val KEY_MODEL = "model"
         private const val KEY_GRAPH_PIDS = "graph_pids"
+        private const val KEY_DASHBOARD_PIDS = "dashboard_pids"
         private const val KEY_BATTERY_GUARD = "battery_guard"
         private const val KEY_KEEP_SCREEN = "keep_screen_on"
         private const val KEY_UPDATE_CHECK = "update_check"
