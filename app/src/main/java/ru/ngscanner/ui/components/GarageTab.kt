@@ -31,6 +31,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -40,6 +41,7 @@ import ru.ngscanner.garage.GarageRepository
 import ru.ngscanner.garage.LogEntry
 import ru.ngscanner.garage.VehicleSuggestion
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -220,12 +222,7 @@ private fun CarCard(car: Car, isActive: Boolean, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     ElevatedCard(onClick = onClick, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(46.dp).clip(RoundedCornerShape(13.dp)).background(cs.surfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Rounded.DirectionsCar, null, Modifier.size(25.dp), tint = cs.primary)
-            }
+            BrandBadge(car.make, 46.dp)
             Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -255,6 +252,57 @@ private fun CarCard(car: Car, isActive: Boolean, onClick: () -> Unit) {
         }
     }
 }
+
+/**
+ * Значок марки: монограмма (первая буква) на «фирменном» цвете вместо общей иконки
+ * машины. Для распространённых марок цвет курирован (узнаваемо), для остальных —
+ * стабильно выводится из имени, поэтому одна марка всегда одного цвета.
+ */
+@Composable
+private fun BrandBadge(make: String, size: Dp) {
+    val color = brandColor(make)
+    val letter = make.trim().firstOrNull { it.isLetter() }?.uppercaseChar()?.toString() ?: "?"
+    Box(
+        Modifier.size(size).clip(RoundedCornerShape(size / 3.4f)).background(color.copy(alpha = 0.16f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(letter, color = color, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.44f).sp)
+    }
+}
+
+private fun brandColor(make: String): Color {
+    val key = make.trim().lowercase()
+    BRAND_COLORS[key]?.let { return it }
+    // Стабильный цвет из имени: одинаковый для одной марки, но разный между марками.
+    var h = 0
+    for (c in key) h = h * 31 + c.code
+    val hue = (((h % 360) + 360) % 360).toFloat()
+    return Color.hsl(hue, 0.5f, 0.5f)
+}
+
+/** Курированные фирменные цвета распространённых на рынке РФ марок (лат. и кир. имена). */
+private val BRAND_COLORS: Map<String, Color> = mapOf(
+    "lada" to Color(0xFF0E7A4B), "лада" to Color(0xFF0E7A4B),
+    "bmw" to Color(0xFF1C69D4),
+    "mercedes-benz" to Color(0xFF4A4F54), "мерседес" to Color(0xFF4A4F54),
+    "audi" to Color(0xFFBB0A30),
+    "volkswagen" to Color(0xFF16418E), "фольксваген" to Color(0xFF16418E),
+    "toyota" to Color(0xFFEB0A1E),
+    "kia" to Color(0xFF4B5157), "киа" to Color(0xFF4B5157),
+    "hyundai" to Color(0xFF0A4595), "хендай" to Color(0xFF0A4595),
+    "nissan" to Color(0xFFC3002F), "ниссан" to Color(0xFFC3002F),
+    "renault" to Color(0xFFBB8A00), "рено" to Color(0xFFBB8A00),
+    "ford" to Color(0xFF1667B3), "форд" to Color(0xFF1667B3),
+    "chevrolet" to Color(0xFFBB8A2E), "шевроле" to Color(0xFFBB8A2E),
+    "skoda" to Color(0xFF0E7A4B), "шкода" to Color(0xFF0E7A4B),
+    "mazda" to Color(0xFF25282A), "мазда" to Color(0xFF25282A),
+    "honda" to Color(0xFFCC0000), "хонда" to Color(0xFFCC0000),
+    "mitsubishi" to Color(0xFFE60012), "митсубиси" to Color(0xFFE60012),
+    "chery" to Color(0xFFB01E24), "чери" to Color(0xFFB01E24),
+    "geely" to Color(0xFF1B4E9B), "джили" to Color(0xFF1B4E9B),
+    "haval" to Color(0xFFB4131A), "хавейл" to Color(0xFFB4131A),
+    "уаз" to Color(0xFF2E6B34), "газ" to Color(0xFF14487A),
+)
 
 @Composable
 private fun ActiveBadge() {
@@ -599,7 +647,11 @@ private fun AddCarForm(suggestion: VehicleSuggestion, onBack: () -> Unit, onSave
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         GarageTopBar("Новая машина", onBack)
-        Text(suggestion.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BrandBadge(suggestion.make, 44.dp)
+            Spacer(Modifier.width(12.dp))
+            Text(suggestion.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        }
         SimpleDropdown("Год выпуска", years, year) { year = it }
         if (suggestion.engines.isNotEmpty()) {
             SimpleDropdown("Двигатель", suggestion.engines, engine) { engine = it }

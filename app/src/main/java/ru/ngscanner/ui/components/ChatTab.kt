@@ -97,7 +97,10 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.m3.markdownColor
+import com.mikepenz.markdown.m3.markdownTypography
 import ru.ngscanner.settings.SessionSummary
 import ru.ngscanner.ui.ConnectionState
 import ru.ngscanner.ui.UiState
@@ -394,7 +397,7 @@ private fun ChatBubble(msg: ChatMessage, onExportPdf: (String) -> Unit) {
     when (msg.role) {
         ChatRole.USER -> { bg = cs.primary; fg = cs.onPrimary }
         ChatRole.SYSTEM -> { bg = cs.errorContainer; fg = cs.onErrorContainer }
-        else -> { bg = cs.surfaceVariant; fg = cs.onSurfaceVariant } // ASSISTANT
+        else -> { bg = cs.surfaceVariant; fg = cs.onSurface } // ASSISTANT — onSurface даёт контраст выше, читать ответ легче
     }
     val alignment = if (msg.role == ChatRole.USER) Alignment.End else Alignment.Start
     // Ответ модели занимает всю ширину — таблицы и код помещаются целиком.
@@ -442,7 +445,32 @@ private fun ChatBubble(msg: ChatMessage, onExportPdf: (String) -> Unit) {
                                 SeverityBadge(it)
                                 Spacer(Modifier.height(10.dp))
                             }
-                            Markdown(content = flattenMarkdownTables(body))
+                            val t = MaterialTheme.typography
+                            Markdown(
+                                content = flattenMarkdownTables(body),
+                                colors = markdownColor(
+                                    text = fg,
+                                    linkText = cs.primary,
+                                    dividerColor = cs.outlineVariant,
+                                    inlineCodeText = cs.primary,
+                                ),
+                                typography = markdownTypography(
+                                    // Единый комфортный межстрочный интервал — текст «ровный» и читаемый.
+                                    text = t.bodyMedium.copy(lineHeight = 22.sp),
+                                    paragraph = t.bodyMedium.copy(lineHeight = 22.sp),
+                                    list = t.bodyMedium.copy(lineHeight = 22.sp),
+                                    bullet = t.bodyMedium.copy(lineHeight = 22.sp),
+                                    ordered = t.bodyMedium.copy(lineHeight = 22.sp),
+                                    // Заголовки умеренные — на узком экране «# H1» не должен быть гигантским.
+                                    h1 = t.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    h2 = t.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    h3 = t.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                                    h4 = t.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    h5 = t.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    h6 = t.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    quote = t.bodyMedium.copy(fontStyle = FontStyle.Italic),
+                                ),
+                            )
                         }
                     } else {
                         Text(msg.text, Modifier.padding(14.dp), color = fg, style = MaterialTheme.typography.bodyMedium)

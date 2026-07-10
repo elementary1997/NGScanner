@@ -45,6 +45,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -304,7 +305,7 @@ private fun UpdateContent(ui: UiState, vm: MainViewModel) {
             runCatching { context.assets.open("CHANGELOG.md").bufferedReader().use { it.readText() } }
                 .getOrDefault("История изменений недоступна.")
         }
-        ChangelogDialog(changelog) { showChangelog = false }
+        ChangelogDialog(changelog, ui.appVersion) { showChangelog = false }
     }
 
     SettingSwitchRow(
@@ -364,19 +365,72 @@ private fun pollRateLabel(ms: Long): String = when (ms) {
     else -> "опрос: обычно"
 }
 
-/** Диалог истории изменений — рендерит bundled CHANGELOG.md как Markdown. */
+private data class ChangeEntry(val version: String, val body: String)
+
+/** Разбирает CHANGELOG.md на секции версий (по заголовкам «## vX.Y.Z»). */
+private fun parseChangelog(md: String): List<ChangeEntry> {
+    val entries = mutableListOf<ChangeEntry>()
+    var version: String? = null
+    val body = StringBuilder()
+    fun flush() {
+        version?.let { entries.add(ChangeEntry(it, body.toString().trim())) }
+        body.setLength(0)
+    }
+    for (line in md.lines()) {
+        val h = line.trim()
+        when {
+            h.startsWith("## ") -> { flush(); version = h.removePrefix("## ").trim() }
+            h.startsWith("# ") -> {} // заголовок файла — пропускаем
+            version != null -> body.appendLine(line)
+        }
+    }
+    flush()
+    return entries
+}
+
+/** Диалог истории изменений: каждая версия — плашкой, установленная выделена. */
 @Composable
-private fun ChangelogDialog(text: String, onDismiss: () -> Unit) {
+private fun ChangelogDialog(text: String, currentVersion: String, onDismiss: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val versions = remember(text) { parseChangelog(text) }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } },
+        icon = { Icon(Icons.Rounded.Info, null, tint = cs.primary) },
         title = { Text("Что нового") },
         text = {
-            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
-                Markdown(content = text)
+            Column(
+                Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                if (versions.isEmpty()) Text(text, style = MaterialTheme.typography.bodyMedium)
+                versions.forEach { entry ->
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        VersionPill(entry.version, current = entry.version.removePrefix("v") == currentVersion)
+                        Markdown(content = entry.body)
+                    }
+                }
             }
         },
     )
+}
+
+@Composable
+private fun VersionPill(version: String, current: Boolean) {
+    val cs = MaterialTheme.colorScheme
+    val color = if (current) cs.primary else cs.onSurfaceVariant
+    Surface(color = color.copy(alpha = 0.14f), shape = RoundedCornerShape(8.dp)) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(version, color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+            if (current) {
+                Spacer(Modifier.width(6.dp))
+                Text("• установлена", color = color, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
 }
 
 /**
