@@ -13,9 +13,23 @@ android {
         applicationId = "ru.ngscanner"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        // Подпись релиза из переменных окружения (задаются секретами в CI —
+        // см. .github/workflows/release.yml). Локально переменных нет — блок пуст,
+        // release собирается без подписи (для боевого APK подпись делает CI).
+        create("release") {
+            System.getenv("RELEASE_KEYSTORE")?.let { ks ->
+                storeFile = file(ks)
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -25,6 +39,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Подписываем релиз, только если keystore передан через окружение (CI).
+            if (System.getenv("RELEASE_KEYSTORE") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
