@@ -34,3 +34,6 @@ secrets.properties
 *.jks
 keystore.properties
 ngscanner-release-secrets.txt
+
+# Генерируется сборкой из корневого CHANGELOG.md (см. copyChangelog в build.gradle)
+/app/src/main/assets/CHANGELOG.md

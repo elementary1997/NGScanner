@@ -13,8 +13,8 @@ android {
         applicationId = "ru.ngscanner"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.2.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -84,3 +84,11 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
 }
+
+// Кладём корневой CHANGELOG.md в assets, чтобы показывать историю изменений прямо в
+// приложении. Копия генерируется сборкой (в .gitignore) — не расходится с оригиналом.
+val copyChangelog = tasks.register<Copy>("copyChangelog") {
+    from(rootProject.file("CHANGELOG.md"))
+    into(layout.projectDirectory.dir("src/main/assets"))
+}
+tasks.named("preBuild") { dependsOn(copyChangelog) }

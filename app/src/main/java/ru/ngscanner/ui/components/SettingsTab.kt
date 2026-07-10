@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -56,12 +58,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.mikepenz.markdown.m3.Markdown
 import ru.ngscanner.llm.LlmModel
 import ru.ngscanner.llm.ProviderId
 import ru.ngscanner.settings.AppSettings
@@ -284,6 +288,25 @@ private fun SettingSwitchRow(title: String, subtitle: String, checked: Boolean, 
 private fun UpdateContent(ui: UiState, vm: MainViewModel) {
     val cs = MaterialTheme.colorScheme
     Text("Текущая версия: ${ui.appVersion}", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+
+    var showChangelog by remember { mutableStateOf(false) }
+    TextButton(
+        onClick = { showChangelog = true },
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+    ) {
+        Icon(Icons.Rounded.Info, null, Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text("Что нового (история изменений)")
+    }
+    if (showChangelog) {
+        val context = LocalContext.current
+        val changelog = remember {
+            runCatching { context.assets.open("CHANGELOG.md").bufferedReader().use { it.readText() } }
+                .getOrDefault("История изменений недоступна.")
+        }
+        ChangelogDialog(changelog) { showChangelog = false }
+    }
+
     SettingSwitchRow(
         title = "Проверять при запуске",
         subtitle = "Уведомлять о новой версии из GitHub Releases.",
@@ -339,6 +362,21 @@ private fun pollRateLabel(ms: Long): String = when (ms) {
     AppSettings.POLL_MS_ECONOMY -> "опрос: экономно"
     AppSettings.POLL_MS_FAST -> "опрос: быстро"
     else -> "опрос: обычно"
+}
+
+/** Диалог истории изменений — рендерит bundled CHANGELOG.md как Markdown. */
+@Composable
+private fun ChangelogDialog(text: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Закрыть") } },
+        title = { Text("Что нового") },
+        text = {
+            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+                Markdown(content = text)
+            }
+        },
+    )
 }
 
 /**
