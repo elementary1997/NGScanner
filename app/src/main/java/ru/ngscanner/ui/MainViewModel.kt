@@ -29,7 +29,13 @@ import ru.ngscanner.garage.Car
 import ru.ngscanner.garage.Garage
 import ru.ngscanner.garage.GarageRepository
 import ru.ngscanner.garage.LogEntry
+import ru.ngscanner.garage.MaintenanceCalc
+import ru.ngscanner.garage.MaintenanceInterval
+import ru.ngscanner.garage.MaintenanceItem
+import ru.ngscanner.garage.MaintenanceRepository
 import ru.ngscanner.garage.ModelNormsRepository
+import ru.ngscanner.service.MaintenanceNotifier
+import java.time.LocalDate
 import ru.ngscanner.garage.VehicleCatalog
 import ru.ngscanner.garage.VehicleSuggestion
 import ru.ngscanner.garage.VinDecoder
@@ -51,6 +57,12 @@ import ru.ngscanner.obd.Elm327
 import ru.ngscanner.obd.FuelCalc
 import ru.ngscanner.obd.ObdParser
 import ru.ngscanner.obd.ObdPid
+import ru.ngscanner.report.DiagnosticReport
+import ru.ngscanner.report.ReportMeta
+import ru.ngscanner.report.ReportRepository
+import ru.ngscanner.report.buildTranscript
+import ru.ngscanner.report.parseReport
+import ru.ngscanner.report.toMarkdown
 import ru.ngscanner.service.ObdForegroundService
 import ru.ngscanner.settings.AppSettings
 import ru.ngscanner.settings.ChatRepository
@@ -76,6 +88,15 @@ enum class DtcCategory { ACTIVE, PENDING, PERMANENT }
 
 /** Диагностический код с расшифровкой из локальной базы и категорией. */
 data class DtcItem(val code: String, val description: String?, val category: DtcCategory)
+
+/** Одна строка снимка условий (freeze frame): подпись, значение, единицы. */
+data class FreezeFrameParam(val label: String, val value: Double, val unit: String)
+
+/**
+ * Снимок условий в момент фиксации кода (Mode 02, кадр 00). По OBD-II снимок один и
+ * привязан к ОДНОМУ коду [dtcCode] (Mode 02 PID 02). Пустой [params] — снимка нет.
+ */
+data class FreezeFrame(val dtcCode: String?, val params: List<FreezeFrameParam>)
 
 @kotlinx.serialization.Serializable
 data class DeviceUi(val name: String, val address: String)
@@ -120,6 +141,10 @@ data class UiState(
     // Не-блокирующее предупреждение: часть режимов упала с ошибкой шины, но коды из
     // других режимов прочитаны и показаны (в отличие от dtcError, который прячет коды).
     val dtcWarning: String? = null,
+    // Снимок условий (freeze frame) на экране кодов — по кнопке.
+    val freezeFrame: FreezeFrame? = null,
+    val freezeFrameReading: Boolean = false,
+    val freezeFrameError: String? = null,
     // запись поездки: идёт ли, сохранённые поездки/события, выбор параметров панели графиков
     val recording: Boolean = false,
     val tripMetas: List<TripMeta> = emptyList(),
@@ -184,6 +209,12 @@ data class UiState(
     val ecuVin: String? = null,
     // модельные нормы параметров для активной машины: pidCmd -> текст нормы
     val modelNorms: Map<String, String> = emptyMap(),
+    // Вычисленные позиции ТО активной машины (интервал + остаток + срочность).
+    val carMaintenance: List<MaintenanceItem> = emptyList(),
+    // Протоколы диагностики (все машины; в UI фильтруются по car.id).
+    val reports: List<ReportMeta> = emptyList(),
+    val reportGenerating: Boolean = false,
+    val reportError: String? = null,
     val normLoadingPid: String? = null,
     // ожидается подтверждение сброса кодов (Mode 04)
     val clearDtcsPending: Boolean = false,
@@ -196,6 +227,7 @@ private class LoadedState(
     val hasKey: Boolean,
     val garage: Garage,
     val modelNorms: Map<String, String>,
+    val maintenance: List<MaintenanceItem>,
     val chat: List<ChatMessage>,
     val sessions: List<SessionSummary>,
     val keysEncrypted: Boolean,
@@ -212,6 +244,7 @@ private class LoadedState(
     val pollIntervalMs: Long,
     val appVersion: String,
     val fuelPrice: Double,
+    val reports: List<ReportMeta>,
 )
 
 /**
@@ -226,10 +259,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val settings by lazy { AppSettings(app) }
     private val garageRepo = GarageRepository(app)
     private val normsRepo = ModelNormsRepository(app)
+    private val maintenanceRepo = MaintenanceRepository(app)
     private val chatRepo = ChatRepository(app)
     private val favoritesRepo = FavoritesRepository(app)
     private val usageRepo = UsageRepository(app)
     private val tripRepo = TripRepository(app)
+    private val reportRepo = ReportRepository(app)
 
     // Запись поездки: буфер синхронных снимков и её старт; чёрный ящик — детект
     // перехода параметров в критическую зону для сохранения окна вокруг события.
@@ -273,6 +308,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     hasKey = key.isNotBlank(),
                     garage = garage,
                     modelNorms = garage.activeCar?.let { c -> normsRepo.normsFor(c.id) } ?: emptyMap(),
+                    maintenance = garage.activeCar?.let { c ->
+                        MaintenanceCalc.computeAll(maintenanceRepo.intervalsFor(c.id), c.mileageKm, LocalDate.now())
+                    } ?: emptyList(),
                     chat = chatRepo.loadChat(),
                     sessions = chatRepo.sessions(),
                     keysEncrypted = settings.encrypted,
@@ -289,6 +327,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     pollIntervalMs = settings.pollIntervalMs,
                     appVersion = AppUpdater.currentVersion(app),
                     fuelPrice = settings.fuelPrice,
+                    reports = reportRepo.metas(),
                 )
             }
             if (llmHistory.isEmpty()) llmHistory = loaded.history
@@ -314,6 +353,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     modelPrices = if (cur.modelPrices == empty.modelPrices) loaded.modelPrices else cur.modelPrices,
                     garage = if (loadGarage) loaded.garage else cur.garage,
                     modelNorms = if (loadGarage) loaded.modelNorms else cur.modelNorms,
+                    carMaintenance = if (loadGarage) loaded.maintenance else cur.carMaintenance,
                     chat = if (cur.chat == empty.chat) loaded.chat else cur.chat,
                     sessions = if (cur.sessions == empty.sessions) loaded.sessions else cur.sessions,
                     keysEncrypted = loaded.keysEncrypted, // не редактируется пользователем
@@ -321,6 +361,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     graphPids = if (cur.graphPids == empty.graphPids) loaded.graphPids else cur.graphPids,
                     dashboardPids = if (cur.dashboardPids == empty.dashboardPids) loaded.dashboardPids else cur.dashboardPids,
                     tripMetas = if (cur.tripMetas == empty.tripMetas) loaded.tripMetas else cur.tripMetas,
+                    reports = if (cur.reports == empty.reports) loaded.reports else cur.reports,
                     // Настройки поведения и версия: тумблеры редко трогают за время загрузки,
                     // а сеттеры пишут и на диск, и в состояние — вливаем значения с диска.
                     batteryGuard = loaded.batteryGuard,
@@ -333,6 +374,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             // Проверка новой версии при запуске (если включена в настройках).
             if (loaded.updateCheck) checkForUpdate(manual = false)
+            // Напоминание о ТО при запуске (если есть просроченные/скорые).
+            checkMaintenanceAndNotify()
         }
     }
 
@@ -992,9 +1035,52 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         runDtcOp { withContext(Dispatchers.IO) { e.command("04") }; readAllDtc(e) }
     }
 
+    /**
+     * Читает снимок условий (freeze frame, Mode 02 кадр 00) на экране кодов — по кнопке.
+     * Логика чтения та же, что у агента (ObdToolExecutor.readFreezeFrame): снимок один,
+     * привязан к одному DTC. Пауза опроса на время чтения (half-duplex шина).
+     */
+    fun readFreezeFrame() {
+        val e = elm ?: return
+        if (_ui.value.freezeFrameReading || _ui.value.dtcReading || _ui.value.diagnosing) return
+        _ui.update { it.copy(freezeFrameReading = true, freezeFrameError = null) }
+        val wasPolling = pollJob?.isActive == true
+        stopPolling()
+        viewModelScope.launch {
+            try {
+                val (frame, err) = withContext(Dispatchers.IO) {
+                    val pids = listOf(
+                        ObdPid.RPM, ObdPid.COOLANT, ObdPid.SPEED, ObdPid.ENGINE_LOAD,
+                        ObdPid.THROTTLE, ObdPid.STFT, ObdPid.MAF,
+                    )
+                    val params = mutableListOf<FreezeFrameParam>()
+                    for (p in pids) {
+                        val suffix = p.cmd.removePrefix("01")
+                        // 00 — номер сохранённого кадра (единственный снимок).
+                        val data = ObdParser.freezeFrameBytes(e.command("02${suffix}00"), suffix)
+                        val value = data?.let { runCatching { p.decode(it) }.getOrNull() }
+                        if (value != null) params.add(FreezeFrameParam(p.label, value, p.unit))
+                    }
+                    val dtcCode = ObdParser.freezeFrameDtc(e.command("020200"))
+                    if (params.isEmpty()) {
+                        null to "Снимок недоступен: нет сохранённого freeze frame (или активных кодов)."
+                    } else {
+                        FreezeFrame(dtcCode, params) to null
+                    }
+                }
+                _ui.update { it.copy(freezeFrame = frame, freezeFrameReading = false, freezeFrameError = err) }
+            } catch (ex: Exception) {
+                _ui.update { it.copy(freezeFrameReading = false, freezeFrameError = "Ошибка чтения снимка: ${ex.message}") }
+            } finally {
+                if (wasPolling && elm != null) startPolling()
+            }
+        }
+    }
+
     /** Общая обвязка операций с кодами: пауза опроса, флаги, восстановление. */
     private fun runDtcOp(op: suspend () -> Pair<List<DtcItem>, List<String>>) {
-        _ui.update { it.copy(dtcReading = true, dtcError = null, dtcWarning = null) }
+        // Снимок сбрасываем: после Mode 04 ЭБУ его стирает, при перечитывании старый неактуален.
+        _ui.update { it.copy(dtcReading = true, dtcError = null, dtcWarning = null, freezeFrame = null, freezeFrameError = null) }
         val wasPolling = pollJob?.isActive == true
         stopPolling()
         viewModelScope.launch {
@@ -1253,6 +1339,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 modelNorms = normsRepo.normsFor(toSave.id),
             )
         }
+        recomputeMaintenance()
     }
 
     /** Декодирует VIN (офлайн для РФ, vPIC для иномарок); результат кладёт в [UiState.vinResult]. */
@@ -1331,17 +1418,190 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setActiveCar(carId: String) {
         _ui.update { it.copy(garage = garageRepo.setActive(carId), modelNorms = normsRepo.normsFor(carId)) }
+        recomputeMaintenance()
     }
 
     fun deleteCar(carId: String) {
         val garage = garageRepo.deleteCar(carId)
-        // Чистим нормы удалённой машины — иначе они остаются осиротевшими навсегда.
+        // Чистим нормы, интервалы ТО и протоколы удалённой машины — иначе осиротеют.
         normsRepo.clearFor(carId)
+        maintenanceRepo.clearFor(carId)
+        reportRepo.deleteForCar(carId)
         _ui.update {
             it.copy(
                 garage = garage,
                 modelNorms = garage.activeCar?.let { c -> normsRepo.normsFor(c.id) } ?: emptyMap(),
+                carMaintenance = garage.activeCar?.let { c ->
+                    MaintenanceCalc.computeAll(maintenanceRepo.intervalsFor(c.id), c.mileageKm, LocalDate.now())
+                } ?: emptyList(),
+                reports = reportRepo.metas(),
             )
+        }
+    }
+
+    // ---- Обслуживание (ТО) ----
+
+    fun setMaintenanceInterval(interval: MaintenanceInterval) {
+        val car = _ui.value.garage.activeCar ?: return
+        maintenanceRepo.upsert(car.id, interval)
+        recomputeMaintenance()
+        checkMaintenanceAndNotify()
+    }
+
+    fun deleteMaintenanceInterval(id: String) {
+        val car = _ui.value.garage.activeCar ?: return
+        maintenanceRepo.delete(car.id, id)
+        recomputeMaintenance()
+    }
+
+    /** Отметить ТО выполненным: база отсчёта = текущий пробег + сегодня. */
+    fun markServiced(id: String) {
+        val car = _ui.value.garage.activeCar ?: return
+        maintenanceRepo.markServiced(car.id, id, car.mileageKm, LocalDate.now().toString())
+        recomputeMaintenance()
+    }
+
+    /** Ручное обновление пробега активной машины (одометра по OBD нет). */
+    fun updateActiveCarMileage(km: Int) {
+        val car = _ui.value.garage.activeCar ?: return
+        val garage = garageRepo.updateCar(car.id) { it.copy(mileageKm = km) }
+        _ui.update { it.copy(garage = garage) }
+        recomputeMaintenance()
+        checkMaintenanceAndNotify()
+    }
+
+    private fun recomputeMaintenance() {
+        val car = _ui.value.garage.activeCar
+        val items = if (car != null) {
+            MaintenanceCalc.computeAll(maintenanceRepo.intervalsFor(car.id), car.mileageKm, LocalDate.now())
+        } else {
+            emptyList()
+        }
+        _ui.update { it.copy(carMaintenance = items) }
+    }
+
+    private fun checkMaintenanceAndNotify() {
+        val car = _ui.value.garage.activeCar ?: return
+        MaintenanceNotifier.notify(getApplication(), car.title, _ui.value.carMaintenance)
+    }
+
+    // ---- Протоколы диагностики ----
+
+    /**
+     * Формирует протокол по переписке с агентом: единый ход в ВЫБРАННЫЙ провайдер/модель
+     * (как [fetchNorm], без инструментов), модель сжимает разбор в строгий JSON; при провале
+     * парсинга сохраняется сырой текст. Провайдер/модель/ключ фиксируются до запуска.
+     */
+    fun generateReport(carId: String) {
+        if (_ui.value.diagnosing || _ui.value.reportGenerating) return
+        val reqProvider = _ui.value.provider
+        val reqModel = _ui.value.model
+        val key = settings.apiKey(reqProvider)
+        if (key.isBlank()) {
+            _ui.update { it.copy(reportError = "Укажите API-ключ в настройках.") }
+            return
+        }
+        val car = _ui.value.garage.cars.firstOrNull { it.id == carId } ?: return
+        val turns = _ui.value.chat.mapNotNull { m ->
+            when (m.role) {
+                ChatRole.USER -> true to m.text
+                ChatRole.ASSISTANT -> false to m.text
+                else -> null
+            }
+        }
+        val transcript = buildTranscript(turns)
+        if (transcript.isBlank()) {
+            _ui.update { it.copy(reportError = "Нет переписки для протокола — сначала проведите диагностику в чате.") }
+            return
+        }
+        val passport = buildString {
+            append("Машина: ").append(car.title)
+            car.spec.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
+            append('\n')
+            car.mileageKm?.let { append("Пробег: ").append(it).append(" км\n") }
+            car.vin?.takeIf { it.isNotBlank() }?.let { append("VIN: ").append(it).append('\n') }
+        }
+        val prompt = passport + "\nПереписка:\n" + transcript
+        _ui.update { it.copy(reportGenerating = true, reportError = null) }
+        viewModelScope.launch {
+            try {
+                val provider = buildProvider(reqProvider, key)
+                val resp = provider.send(
+                    LlmRequest(reqModel, REPORT_SYSTEM, listOf(LlmMessage(Role.USER, content = prompt)), emptyList()),
+                )
+                resp.usage?.let { recordUsage(reqProvider, reqModel, it.prompt, it.completion) }
+                val text = when (resp) {
+                    is LlmResponse.Final -> resp.text
+                    is LlmResponse.ToolUse -> resp.text ?: ""
+                }
+                val date = LocalDate.now().toString()
+                val report = parseReport(
+                    text = text,
+                    id = ReportRepository.newId(),
+                    carId = car.id,
+                    dateIso = date,
+                    title = "Протокол ${car.title} · $date",
+                    carTitle = car.title,
+                    carSpec = car.spec,
+                    mileageKm = car.mileageKm,
+                    vin = car.vin,
+                    provider = provider.displayName,
+                    model = reqModel,
+                )
+                val metas = withContext(Dispatchers.IO) { reportRepo.save(report) }
+                _ui.update { it.copy(reports = metas, reportGenerating = false) }
+            } catch (ex: CancellationException) {
+                _ui.update { it.copy(reportGenerating = false) }
+                throw ex
+            } catch (ex: Exception) {
+                _ui.update { it.copy(reportGenerating = false, reportError = errorMessage(ex)) }
+            }
+        }
+    }
+
+    fun renameReport(id: String, title: String) {
+        viewModelScope.launch {
+            val metas = withContext(Dispatchers.IO) { reportRepo.rename(id, title) }
+            _ui.update { it.copy(reports = metas) }
+        }
+    }
+
+    fun deleteReport(id: String) {
+        viewModelScope.launch {
+            val metas = withContext(Dispatchers.IO) { reportRepo.delete(id) }
+            _ui.update { it.copy(reports = metas) }
+        }
+    }
+
+    /** Полный протокол для экрана просмотра (meta списка достаточно только для карточки). */
+    suspend fun loadReport(id: String): DiagnosticReport? =
+        withContext(Dispatchers.IO) { reportRepo.load(id) }
+
+    /** Экспорт протокола в .md и системный «Поделиться»; ошибку I/O показываем тостом. */
+    fun shareReportMd(id: String) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val report = withContext(Dispatchers.IO) { reportRepo.load(id) } ?: return@launch
+            val uri = withContext(Dispatchers.IO) {
+                runCatching { Exporter.buildMarkdownFile(app, report.title, report.toMarkdown()) }
+                    .getOrElse { Log.w(TAG, "Экспорт MD не удался", it); null }
+            }
+            if (uri != null) Exporter.shareMarkdown(app, uri)
+            else Toast.makeText(app, "Не удалось создать файл", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Экспорт протокола в PDF и системный «Поделиться». */
+    fun shareReportPdf(id: String) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val report = withContext(Dispatchers.IO) { reportRepo.load(id) } ?: return@launch
+            val uri = withContext(Dispatchers.IO) {
+                runCatching { Exporter.buildPdf(app, report.title, report.toMarkdown(), report.id.hashCode().toLong()) }
+                    .getOrElse { Log.w(TAG, "Экспорт PDF не удался", it); null }
+            }
+            if (uri != null) Exporter.sharePdf(app, uri)
+            else Toast.makeText(app, "Не удалось создать PDF", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -1521,6 +1781,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val lastUser = history.indexOfLast { it.role == Role.USER }
             return if (lastUser >= 0) history.drop(lastUser) else history
         }
+
+        // Системный промпт протокола: единый ход, строгий JSON, заземление на переписку.
+        private const val REPORT_SYSTEM =
+            "Ты составляешь протокол автодиагностики из переписки владельца с ассистентом-диагностом. " +
+                "Верни ТОЛЬКО валидный JSON-объект без markdown-ограждений с полями: " +
+                "complaint (строка — жалоба владельца), " +
+                "statusLabel (РОВНО одно из: КРИТИЧНО | ВНИМАНИЕ | НОРМА | НУЖНЫ ДАННЫЕ), " +
+                "verdict (одна короткая строка — что вероятнее и можно ли ехать), " +
+                "findings (массив строк — реальные коды/параметры ИЗ переписки), " +
+                "causes (массив строк — вероятные причины), " +
+                "recommendations (массив строк — что проверить или сделать). " +
+                "ЗАЗЕМЛЕНИЕ: бери факты ТОЛЬКО из переписки, НЕ выдумывай коды, значения и причины; " +
+                "если вердикт не выведен — statusLabel=НУЖНЫ ДАННЫЕ."
 
         private const val TAG = "MainViewModel"
         private const val POLL_INTERVAL_MS = 1500L

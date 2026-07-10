@@ -366,6 +366,22 @@ object ObdParser {
         return dataHex.chunked(2).filter { it.length == 2 }.map { it.toInt(16) }.toIntArray()
     }
 
+    /**
+     * Код, к которому привязан сохранённый снимок (Mode 02 PID 02): ответ `42 02
+     * FRAME# DTChi DTClo`. Пропускаем байт номера кадра, декодируем пару байт DTC.
+     * `null` — снимка/кода нет («0000») или ответ не распознан.
+     */
+    fun freezeFrameDtc(raw: String): String? {
+        val hex = normalize(raw)
+        val idx = hex.indexOf("4202")
+        if (idx < 0) return null
+        val after = hex.substring(idx + 4).drop(2) // пропускаем байт номера кадра
+        if (after.length < 4) return null
+        val word = after.substring(0, 4)
+        if (word == "0000") return null
+        return runCatching { decodeDtc(word) }.getOrNull()
+    }
+
     private fun normalize(raw: String): String =
         raw.uppercase().replace(Regex("[^0-9A-F]"), "")
 }

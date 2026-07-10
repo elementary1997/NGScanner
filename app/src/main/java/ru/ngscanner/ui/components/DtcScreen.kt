@@ -65,6 +65,7 @@ internal fun DtcScreen(
     onRefresh: () -> Unit,
     onClear: () -> Unit,
     onExplain: (DtcItem) -> Unit,
+    onReadFreezeFrame: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
     var confirmClear by remember { mutableStateOf(false) }
@@ -121,6 +122,10 @@ internal fun DtcScreen(
                     Category("Неподтверждённые", "намечающиеся, текущий цикл", ui.dtcItems.filter { it.category == DtcCategory.PENDING }, cs.tertiary, onExplain)
                     Category("Постоянные", "не стираются сбросом, пока ЭБУ не убедится", ui.dtcItems.filter { it.category == DtcCategory.PERMANENT }, cs.error, onExplain)
                 }
+            }
+
+            if (ui.dtcItems.any { it.category == DtcCategory.ACTIVE } && !ui.dtcReading) {
+                FreezeFrameBlock(ui, onReadFreezeFrame)
             }
 
             if (ui.dtcItems.any { it.category == DtcCategory.ACTIVE } && !ui.dtcReading) {
@@ -295,6 +300,59 @@ private fun dtcDanger(code: String): DtcDanger {
         // EVAP-негерметичность P044x–P045x — некритично («подтяните крышку бака»).
         c.matches(Regex("P04[45][0-9A-F]")) -> DtcDanger.MINOR
         else -> DtcDanger.UNKNOWN
+    }
+}
+
+/**
+ * Блок снимка условий (freeze frame) на экране кодов, перед кнопкой сброса: снимок
+ * читается по кнопке, честно называет привязанный DTC (снимок один на код по OBD-II).
+ */
+@Composable
+private fun FreezeFrameBlock(ui: UiState, onRead: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val ff = ui.freezeFrame
+    when {
+        ui.freezeFrameReading -> Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(12.dp))
+            Text("Читаю снимок из ЭБУ…", color = cs.onSurfaceVariant)
+        }
+        ff != null -> ElevatedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp)) {
+                Text(
+                    ff.dtcCode?.let { "Условия в момент фиксации кода $it" }
+                        ?: "Условия в момент фиксации кода (freeze frame)",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(8.dp))
+                ff.params.forEach { p ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(p.label, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                        Text(
+                            "${formatMetric(p.value)} ${p.unit}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+            }
+        }
+        else -> Column {
+            ui.freezeFrameError?.let {
+                Surface(shape = RoundedCornerShape(12.dp), color = cs.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                    Text(it, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+            OutlinedButton(
+                onClick = onRead,
+                modifier = Modifier.fillMaxWidth().height(46.dp),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Text("Показать снимок условий (freeze frame)")
+            }
+        }
     }
 }
 

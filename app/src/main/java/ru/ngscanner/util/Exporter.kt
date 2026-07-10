@@ -72,6 +72,36 @@ object Exporter {
         context.startActivity(chooser)
     }
 
+    /**
+     * Пишет .md во временную папку `cacheDir/shared` (та же, что и PDF, с чисткой по
+     * возрасту) и возвращает content-URI через FileProvider. Тяжёлую запись — не на
+     * главном потоке.
+     */
+    fun buildMarkdownFile(context: Context, name: String, markdown: String): Uri {
+        val dir = File(context.cacheDir, "shared").apply { mkdirs() }
+        val now = System.currentTimeMillis()
+        // Чистим устаревшие экспорты (по возрасту), не трогая свежие/открытый share.
+        dir.listFiles()?.forEach { f ->
+            if (f.extension == "md" && now - f.lastModified() > CACHE_TTL_MS) runCatching { f.delete() }
+        }
+        val safe = name.replace(Regex("[^A-Za-zА-Яа-яЁё0-9_.-]+"), "_").trim('_').take(60).ifBlank { "report" }
+        val file = File(dir, "$safe.md")
+        file.writeText(markdown)
+        return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }
+
+    /** Открывает «Поделиться» для готового Markdown-файла. */
+    fun shareMarkdown(context: Context, uri: Uri) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/markdown"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(intent, "Сохранить или отправить Markdown")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    }
+
     /** Открывает «Поделиться/сохранить» для готового PDF (startActivity — с главного потока). */
     fun sharePdf(context: Context, uri: Uri) {
         val intent = Intent(Intent.ACTION_SEND).apply {

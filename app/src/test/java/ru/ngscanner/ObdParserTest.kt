@@ -314,4 +314,23 @@ class ObdParserTest {
         val raw = "4902015741 4A4D4235 34313332"
         assertNull(ObdParser.parseVin(raw))
     }
+
+    // ---- Freeze frame: код, к которому привязан снимок (Mode 02 PID 02) ----
+    @Test
+    fun freezeFrameDtcDecodesCode() {
+        // 42 02 <кадр 00> 01 33 → пропускаем номер кадра, DTC 0133 → P0133.
+        assertEquals("P0133", ObdParser.freezeFrameDtc("42 02 00 01 33"))
+    }
+
+    @Test
+    fun freezeFrameDtcNullWhenNoCode() {
+        assertNull(ObdParser.freezeFrameDtc("42 02 00 00 00")) // 0000 — кода нет
+        assertNull(ObdParser.freezeFrameDtc("NO DATA")) // нет 4202
+    }
+
+    @Test
+    fun freezeFrameDtcWithCanHeader() {
+        // С заголовком ЭБУ и SF-байтом длины перед 4202 — декодируется тот же код.
+        assertEquals("P0133", ObdParser.freezeFrameDtc("7E8 05 42 02 00 01 33"))
+    }
 }

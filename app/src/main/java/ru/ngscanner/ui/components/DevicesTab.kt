@@ -77,6 +77,7 @@ internal fun DevicesTab(
     onReadDtc: () -> Unit,
     onClearDtc: () -> Unit,
     onExplainDtc: (ru.ngscanner.ui.DtcItem) -> Unit,
+    onReadFreezeFrame: () -> Unit,
 ) {
     // Имя открытого параметра (String сохраняется в Bundle → график переживает поворот).
     var graphName by rememberSaveable { mutableStateOf<String?>(null) }
@@ -131,6 +132,7 @@ internal fun DevicesTab(
             onRefresh = onReadDtc,
             onClear = onClearDtc,
             onExplain = { item -> showDtc = false; onExplainDtc(item) },
+            onReadFreezeFrame = onReadFreezeFrame,
         )
         return
     }

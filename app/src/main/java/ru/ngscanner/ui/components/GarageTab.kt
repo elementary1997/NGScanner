@@ -25,8 +25,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.DriveFileRenameOutline
 import androidx.compose.material.icons.rounded.Garage
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.PictureAsPdf
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.TextButton
@@ -41,7 +45,15 @@ import androidx.compose.material.icons.rounded.Numbers
 import ru.ngscanner.garage.Car
 import ru.ngscanner.garage.GarageRepository
 import ru.ngscanner.garage.LogEntry
+import ru.ngscanner.garage.MaintenanceInterval
+import ru.ngscanner.garage.MaintenanceItem
+import ru.ngscanner.garage.MaintenanceKind
+import ru.ngscanner.garage.MaintenanceRepository
+import ru.ngscanner.garage.MaintenanceUrgency
 import ru.ngscanner.garage.VehicleSuggestion
+import ru.ngscanner.report.DiagnosticReport
+import ru.ngscanner.report.ReportMeta
+import ru.ngscanner.report.ReportStatus
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
@@ -86,6 +98,7 @@ import ru.ngscanner.ui.MainViewModel
 private sealed interface GarageNav {
     data object List : GarageNav
     data class Detail(val carId: String) : GarageNav
+    data class Report(val carId: String, val reportId: String) : GarageNav
     data object AddSearch : GarageNav
     data class AddForm(val suggestion: VehicleSuggestion) : GarageNav
     data object AddVin : GarageNav
@@ -99,6 +112,7 @@ private val GarageNavSaver = Saver<GarageNav, String>(
             is GarageNav.AddSearch -> "S"
             is GarageNav.AddVin -> "V"
             is GarageNav.Detail -> "D:${nav.carId}"
+            is GarageNav.Report -> "R:${nav.carId}:${nav.reportId}"
             is GarageNav.AddForm -> "F:" + Json.encodeToString(nav.suggestion)
         }
     },
@@ -107,6 +121,8 @@ private val GarageNavSaver = Saver<GarageNav, String>(
             s == "S" -> GarageNav.AddSearch
             s == "V" -> GarageNav.AddVin
             s.startsWith("D:") -> GarageNav.Detail(s.removePrefix("D:"))
+            s.startsWith("R:") -> s.removePrefix("R:").split(":", limit = 2)
+                .takeIf { it.size == 2 }?.let { GarageNav.Report(it[0], it[1]) } ?: GarageNav.List
             s.startsWith("F:") -> runCatching {
                 GarageNav.AddForm(Json.decodeFromString<VehicleSuggestion>(s.removePrefix("F:")))
             }.getOrDefault(GarageNav.List)
@@ -122,10 +138,11 @@ internal fun GarageTab(ui: UiState, vm: MainViewModel) {
     // приложения. На корневом списке обработчик выключен — тогда «назад» ловит
     // MainScreen и уводит на вкладку «Приборы».
     BackHandler(enabled = nav !is GarageNav.List) {
-        nav = when (nav) {
+        nav = when (val n = nav) {
             is GarageNav.AddForm -> GarageNav.AddSearch
             is GarageNav.AddSearch -> { vm.clearSuggestions(); GarageNav.List }
             is GarageNav.AddVin -> { vm.clearVin(); GarageNav.List }
+            is GarageNav.Report -> GarageNav.Detail(n.carId)
             else -> GarageNav.List
         }
     }
@@ -144,11 +161,38 @@ internal fun GarageTab(ui: UiState, vm: MainViewModel) {
                 CarDetailScreen(
                     car = car,
                     isActive = ui.garage.activeCarId == car.id,
+                    maintenance = ui.carMaintenance,
+                    reports = ui.reports.filter { it.carId == car.id },
+                    reportGenerating = ui.reportGenerating,
+                    reportError = ui.reportError,
                     onBack = { nav = GarageNav.List },
                     onMakeActive = { vm.setActiveCar(car.id) },
                     onDelete = { vm.deleteCar(car.id); nav = GarageNav.List },
                     onAddEntry = { text, km -> vm.addLogEntry(text, km) },
                     onDeleteEntry = { entryId -> vm.deleteLogEntry(car.id, entryId) },
+                    onSetMaintenance = { vm.setMaintenanceInterval(it) },
+                    onMarkServiced = { vm.markServiced(it) },
+                    onDeleteMaintenance = { vm.deleteMaintenanceInterval(it) },
+                    onUpdateMileage = { vm.updateActiveCarMileage(it) },
+                    onGenerateReport = { vm.generateReport(car.id) },
+                    onOpenReport = { nav = GarageNav.Report(car.id, it) },
+                )
+            }
+        }
+        is GarageNav.Report -> {
+            val meta = ui.reports.firstOrNull { it.id == n.reportId }
+            if (meta == null) {
+                LaunchedEffect(Unit) { nav = GarageNav.Detail(n.carId) }
+            } else {
+                ReportScreen(
+                    reportId = n.reportId,
+                    title = meta.title,
+                    loadReport = { vm.loadReport(n.reportId) },
+                    onBack = { nav = GarageNav.Detail(n.carId) },
+                    onRename = { vm.renameReport(n.reportId, it) },
+                    onShareMd = { vm.shareReportMd(n.reportId) },
+                    onSharePdf = { vm.shareReportPdf(n.reportId) },
+                    onDelete = { vm.deleteReport(n.reportId); nav = GarageNav.Detail(n.carId) },
                 )
             }
         }
@@ -398,14 +442,26 @@ private fun GarageTopBar(title: String, onBack: () -> Unit) {
 private fun CarDetailScreen(
     car: Car,
     isActive: Boolean,
+    maintenance: List<MaintenanceItem>,
+    reports: List<ReportMeta>,
+    reportGenerating: Boolean,
+    reportError: String?,
     onBack: () -> Unit,
     onMakeActive: () -> Unit,
     onDelete: () -> Unit,
     onAddEntry: (String, Int?) -> Unit,
     onDeleteEntry: (String) -> Unit,
+    onSetMaintenance: (MaintenanceInterval) -> Unit,
+    onMarkServiced: (String) -> Unit,
+    onDeleteMaintenance: (String) -> Unit,
+    onUpdateMileage: (Int) -> Unit,
+    onGenerateReport: () -> Unit,
+    onOpenReport: (String) -> Unit,
 ) {
     var showEntry by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
+    var showAddInterval by remember { mutableStateOf(false) }
+    var showMileage by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -413,8 +469,34 @@ private fun CarDetailScreen(
         GarageTopBar(car.title, onBack)
         CarSpecCard(car, isActive, onMakeActive, onDelete = { showDelete = true })
         CtxNote()
+        // ТО ведётся для активной машины (методы работают с активной) — секцию показываем
+        // только когда просматриваем активную.
+        if (isActive) {
+            MaintenanceSection(
+                car = car,
+                items = maintenance,
+                onAdd = { showAddInterval = true },
+                onMarkServiced = onMarkServiced,
+                onDelete = onDeleteMaintenance,
+                onUpdateMileage = { showMileage = true },
+            )
+        }
+        ReportsSection(
+            reports = reports,
+            isActive = isActive,
+            generating = reportGenerating,
+            error = reportError,
+            onGenerate = onGenerateReport,
+            onOpen = onOpenReport,
+        )
         LogbookSection(car.log, onAdd = { showEntry = true }, onDeleteEntry = onDeleteEntry)
         Spacer(Modifier.height(16.dp))
+    }
+    if (showAddInterval) {
+        AddIntervalDialog(car, onDismiss = { showAddInterval = false }) { showAddInterval = false; onSetMaintenance(it) }
+    }
+    if (showMileage) {
+        MileageDialog(car.mileageKm, onDismiss = { showMileage = false }) { showMileage = false; onUpdateMileage(it) }
     }
     if (showEntry) {
         AddEntryDialog(
@@ -543,6 +625,169 @@ private fun CtxNote() {
 }
 
 @Composable
+private fun MaintenanceSection(
+    car: Car,
+    items: List<MaintenanceItem>,
+    onAdd: () -> Unit,
+    onMarkServiced: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onUpdateMileage: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        GarageSectionLabel("Обслуживание")
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Пробег: ${car.mileageKm?.let { "$it км" } ?: "не задан"}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = cs.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onUpdateMileage) { Text("Обновить") }
+        }
+        if (items.isEmpty()) {
+            Text(
+                "Добавьте интервалы ТО — напомним, когда пора менять масло, ремень, фильтры.",
+                style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant,
+            )
+        } else {
+            items.forEach { MaintenanceRow(it, onMarkServiced, onDelete) }
+        }
+        OutlinedButton(
+            onClick = onAdd,
+            modifier = Modifier.fillMaxWidth().height(46.dp),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Добавить интервал")
+        }
+    }
+}
+
+@Composable
+private fun MaintenanceRow(item: MaintenanceItem, onMarkServiced: (String) -> Unit, onDelete: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val color = when (item.urgency) {
+        MaintenanceUrgency.OVERDUE -> cs.error
+        MaintenanceUrgency.SOON -> cs.tertiary
+        MaintenanceUrgency.OK -> cs.onSurfaceVariant
+    }
+    ElevatedCard(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(item.interval.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    if (item.urgency != MaintenanceUrgency.OK) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (item.urgency == MaintenanceUrgency.OVERDUE) "ПРОСРОЧЕНО" else "СКОРО",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = color,
+                        )
+                    }
+                }
+                Text(maintenanceRemaining(item), style = MaterialTheme.typography.bodySmall, color = color)
+            }
+            TextButton(onClick = { onMarkServiced(item.interval.id) }) { Text("Обслужил") }
+            IconButton(onClick = { onDelete(item.interval.id) }) {
+                Icon(Icons.Rounded.DeleteOutline, "Удалить", Modifier.size(18.dp), tint = cs.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+private fun maintenanceRemaining(item: MaintenanceItem): String {
+    val parts = mutableListOf<String>()
+    item.remainingKm?.let { parts.add(if (it > 0) "осталось ~$it км" else "просрочка ${-it} км") }
+    item.remainingDays?.let { parts.add(if (it > 0) "или ~$it дн." else "просрочка ${-it} дн.") }
+    return parts.joinToString(" · ").ifEmpty { "нет базы — отметьте «Обслужил» после замены" }
+}
+
+@Composable
+private fun AddIntervalDialog(car: Car, onDismiss: () -> Unit, onSave: (MaintenanceInterval) -> Unit) {
+    var kind by remember { mutableStateOf(MaintenanceKind.ENGINE_OIL) }
+    var km by remember { mutableStateOf("") }
+    var months by remember { mutableStateOf("") }
+    val valid = km.toIntOrNull() != null || months.toIntOrNull() != null
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onSave(
+                        MaintenanceInterval(
+                            id = MaintenanceRepository.newId(),
+                            kind = kind,
+                            intervalKm = km.toIntOrNull(),
+                            intervalMonths = months.toIntOrNull(),
+                            lastServiceKm = car.mileageKm,
+                            lastServiceDateIso = java.time.LocalDate.now().toString(),
+                        ),
+                    )
+                },
+                enabled = valid,
+            ) { Text("Добавить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+        title = { Text("Интервал ТО") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SimpleDropdown("Вид работ", MaintenanceKind.entries.map { it.label }, kind.label) { sel ->
+                    kind = MaintenanceKind.entries.first { it.label == sel }
+                }
+                OutlinedTextField(
+                    value = km,
+                    onValueChange = { km = it.filter(Char::isDigit).take(7) },
+                    label = { Text("Интервал, км") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = months,
+                    onValueChange = { months = it.filter(Char::isDigit).take(3) },
+                    label = { Text("Интервал, месяцев") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "База отсчёта — текущий пробег и сегодня. После замены жмите «Обслужил».",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+    )
+}
+
+@Composable
+private fun MileageDialog(current: Int?, onDismiss: () -> Unit, onSave: (Int) -> Unit) {
+    var km by remember { mutableStateOf(current?.toString() ?: "") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = { km.toIntOrNull()?.let { onSave(it) } }, enabled = km.toIntOrNull() != null) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+        title = { Text("Текущий пробег") },
+        text = {
+            OutlinedTextField(
+                value = km,
+                onValueChange = { km = it.filter(Char::isDigit).take(7) },
+                label = { Text("Пробег, км") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+    )
+}
+
+@Composable
 private fun LogbookSection(log: List<LogEntry>, onAdd: () -> Unit, onDeleteEntry: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -640,6 +885,285 @@ private fun LogEntryRow(e: LogEntry, onDelete: () -> Unit) {
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Отмена") } },
         )
     }
+}
+
+// ---- Протоколы диагностики ----
+
+@Composable
+private fun ReportsSection(
+    reports: List<ReportMeta>,
+    isActive: Boolean,
+    generating: Boolean,
+    error: String?,
+    onGenerate: () -> Unit,
+    onOpen: (String) -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "ПРОТОКОЛЫ ДИАГНОСТИКИ",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.6.sp,
+                color = cs.onSurfaceVariant,
+            )
+            TextButton(onClick = onGenerate, enabled = !generating) {
+                if (generating) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Rounded.Description, null, Modifier.size(18.dp))
+                }
+                Spacer(Modifier.width(6.dp))
+                Text(if (generating) "Формирую…" else "Сформировать")
+            }
+        }
+        if (!isActive) {
+            Text(
+                "Протокол берёт текущую переписку с ассистентом (она про активную машину). " +
+                    "Сделайте эту машину активной, чтобы протокол был именно про неё.",
+                style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant,
+            )
+        }
+        error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.error) }
+        if (reports.isEmpty()) {
+            Text(
+                "Протоколов пока нет. Проведите диагностику в чате и нажмите «Сформировать» — " +
+                    "ассистент сожмёт разбор в документ (Markdown или PDF).",
+                style = MaterialTheme.typography.bodyMedium,
+                color = cs.onSurfaceVariant,
+            )
+        } else {
+            reports.forEach { meta -> ReportRow(meta, onClick = { onOpen(meta.id) }) }
+        }
+    }
+}
+
+@Composable
+private fun ReportRow(meta: ReportMeta, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    ElevatedCard(onClick = onClick, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    meta.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                )
+                Spacer(Modifier.height(5.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        meta.dateIso,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = cs.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    StatusBadge(meta.statusLabel)
+                }
+            }
+            Icon(Icons.Rounded.ChevronRight, null, tint = cs.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun StatusBadge(label: String) {
+    val cs = MaterialTheme.colorScheme
+    val color = when (label) {
+        ReportStatus.CRITICAL -> cs.error
+        ReportStatus.WARNING -> cs.tertiary
+        ReportStatus.OK -> cs.primary
+        else -> cs.onSurfaceVariant
+    }
+    Surface(shape = RoundedCornerShape(6.dp), color = color.copy(alpha = 0.14f)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = color,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+        )
+    }
+}
+
+@Composable
+private fun ReportScreen(
+    reportId: String,
+    title: String,
+    loadReport: suspend () -> DiagnosticReport?,
+    onBack: () -> Unit,
+    onRename: (String) -> Unit,
+    onShareMd: () -> Unit,
+    onSharePdf: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    var report by remember(reportId) { mutableStateOf<DiagnosticReport?>(null) }
+    var loaded by remember(reportId) { mutableStateOf(false) }
+    LaunchedEffect(reportId) {
+        report = loadReport()
+        loaded = true
+    }
+    var showRename by remember { mutableStateOf(false) }
+    var showDelete by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        GarageTopBar(title, onBack)
+        val r = report
+        when {
+            !loaded -> Box(Modifier.fillMaxWidth().padding(top = 40.dp), Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            r == null -> Text("Протокол не найден.", color = cs.onSurfaceVariant)
+            else -> ReportBody(r)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { showRename = true }, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Rounded.DriveFileRenameOutline, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Имя")
+            }
+            OutlinedButton(onClick = onShareMd, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Rounded.Share, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("MD")
+            }
+            OutlinedButton(onClick = onSharePdf, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Rounded.PictureAsPdf, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("PDF")
+            }
+        }
+        TextButton(onClick = { showDelete = true }) {
+            Icon(Icons.Rounded.DeleteOutline, null, Modifier.size(18.dp), tint = cs.error)
+            Spacer(Modifier.width(6.dp))
+            Text("Удалить протокол", color = cs.error)
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+    if (showRename) {
+        RenameReportDialog(current = title, onDismiss = { showRename = false }) {
+            showRename = false; onRename(it)
+        }
+    }
+    if (showDelete) {
+        AlertDialog(
+            onDismissRequest = { showDelete = false },
+            icon = { Icon(Icons.Rounded.DeleteOutline, null, tint = cs.error) },
+            title = { Text("Удалить протокол?") },
+            text = { Text("Документ будет удалён без возможности восстановления.") },
+            confirmButton = {
+                TextButton(onClick = { showDelete = false; onDelete() }) { Text("Удалить", color = cs.error) }
+            },
+            dismissButton = { TextButton(onClick = { showDelete = false }) { Text("Отмена") } },
+        )
+    }
+}
+
+@Composable
+private fun ReportBody(r: DiagnosticReport) {
+    val cs = MaterialTheme.colorScheme
+    ElevatedCard(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column {
+                SpecRow("Машина", r.carTitle)
+                if (r.carSpec.isNotBlank()) SpecRow("Двигатель / год", r.carSpec)
+                r.mileageKm?.let { SpecRow("Пробег", "$it км") }
+                r.vin?.takeIf { it.isNotBlank() }?.let { SpecRow("VIN", it) }
+                SpecRow("Дата", r.dateIso)
+            }
+            HorizontalDivider(color = cs.outline.copy(alpha = 0.5f))
+            StatusBadge(r.statusLabel)
+            if (r.verdict.isNotBlank()) {
+                Text(r.verdict, style = MaterialTheme.typography.bodyLarge, color = cs.onSurface, lineHeight = 22.sp)
+            }
+            if (r.complaint.isNotBlank()) ReportField("Жалоба", r.complaint)
+            if (r.rawBody != null) {
+                Text(r.rawBody, style = MaterialTheme.typography.bodyMedium, color = cs.onSurface, lineHeight = 20.sp)
+            } else {
+                ReportList("Находки", r.findings)
+                ReportList("Вероятные причины", r.causes)
+                ReportList("Что проверить и рекомендации", r.recommendations)
+            }
+            val by = listOf(r.provider, r.model).filter { it.isNotBlank() }.joinToString(" · ")
+            if (by.isNotBlank()) {
+                Text(
+                    "Ассистент: $by",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = cs.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReportField(label: String, value: String) {
+    val cs = MaterialTheme.colorScheme
+    Column {
+        Text(
+            label.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            letterSpacing = 0.8.sp,
+            color = cs.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = cs.onSurface, lineHeight = 20.sp)
+    }
+}
+
+@Composable
+private fun ReportList(title: String, items: List<String>) {
+    if (items.isEmpty()) return
+    val cs = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text(
+            title.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            letterSpacing = 0.8.sp,
+            color = cs.onSurfaceVariant,
+        )
+        items.forEach { item ->
+            Row(verticalAlignment = Alignment.Top) {
+                Text("•", style = MaterialTheme.typography.bodyMedium, color = cs.primary)
+                Spacer(Modifier.width(8.dp))
+                Text(item, style = MaterialTheme.typography.bodyMedium, color = cs.onSurface, modifier = Modifier.weight(1f), lineHeight = 20.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RenameReportDialog(current: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var name by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.DriveFileRenameOutline, null) },
+        title = { Text("Переименовать протокол") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
 }
 
 @Composable
