@@ -24,6 +24,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import ru.ngscanner.agent.AgentEvent
 import ru.ngscanner.agent.DiagnosticAgent
+import ru.ngscanner.agent.DiagnosticVerdict
 import ru.ngscanner.agent.ObdToolExecutor
 import ru.ngscanner.bluetooth.BluetoothController
 import ru.ngscanner.garage.Car
@@ -119,8 +120,17 @@ data class MetricSample(val tMs: Long, val value: Double)
 @kotlinx.serialization.Serializable
 enum class ChatRole { USER, ASSISTANT, TOOL, SYSTEM }
 
+/**
+ * Сообщение чата. [verdict] непуст, когда агент завершил диагностику структурным
+ * вердиктом — тогда UI рисует карточку с заземлением вместо простого текста.
+ * Значение по умолчанию сохраняет совместимость с уже сохранёнными диалогами.
+ */
 @kotlinx.serialization.Serializable
-data class ChatMessage(val role: ChatRole, val text: String)
+data class ChatMessage(
+    val role: ChatRole,
+    val text: String,
+    val verdict: DiagnosticVerdict? = null,
+)
 
 sealed interface TestStatus {
     data object Success : TestStatus
@@ -972,6 +982,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         }
                         // Шаг инструмента — не строка в чате, а сменяющийся статус под спиннером.
                         is AgentEvent.ToolCall -> _ui.update { it.copy(agentStatus = toolStatusText(event.name)) }
+                        // Структурный вердикт: текст кладём для истории/экспорта, а UI
+                        // рисует по verdict карточку с проверенным заземлением.
+                        is AgentEvent.Verdict -> {
+                            appendChat(
+                                ChatMessage(
+                                    ChatRole.ASSISTANT,
+                                    event.verdict.toPlainText(),
+                                    verdict = event.verdict,
+                                ),
+                            )
+                            _ui.update { it.copy(agentStatus = null) }
+                        }
                         is AgentEvent.Usage -> recordUsage(reqProvider, reqModel, event.prompt, event.completion)
                     }
                 })

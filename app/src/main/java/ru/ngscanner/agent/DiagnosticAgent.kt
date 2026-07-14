@@ -6,6 +6,7 @@ import ru.ngscanner.llm.LlmProvider
 import ru.ngscanner.llm.LlmRequest
 import ru.ngscanner.llm.LlmResponse
 import ru.ngscanner.llm.Role
+import ru.ngscanner.llm.ToolResult
 
 /**
  * Диагностический агентный цикл.
@@ -44,6 +45,10 @@ class DiagnosticAgent(
             if (!carContext.isNullOrBlank()) append("\n\n").append(carContext)
         }
 
+        // Сырые ответы инструментов — источник истины для проверки заземления вердикта:
+        // на что модель сослалась, того адаптер мог и не отдавать.
+        val toolOutputs = mutableListOf<String>()
+
         var steps = 0
         while (steps++ < MAX_STEPS) {
             val response = provider.send(LlmRequest(model, system, messages, ObdTools.all))
@@ -59,11 +64,30 @@ class DiagnosticAgent(
                     messages.add(
                         LlmMessage(Role.ASSISTANT, content = response.text, toolCalls = response.calls),
                     )
+                    // Вердикт — не обращение к железу: исполнителю его не отдаём, разбираем сами.
+                    val verdictCall = response.calls.firstOrNull { it.name == SUBMIT_VERDICT }
                     val results = response.calls.map { call ->
-                        onEvent(AgentEvent.ToolCall(call.name))
-                        executor.execute(call)
+                        if (call.name == SUBMIT_VERDICT) {
+                            ToolResult(call.id, "Вердикт принят и показан пользователю.")
+                        } else {
+                            onEvent(AgentEvent.ToolCall(call.name))
+                            executor.execute(call).also { toolOutputs.add(it.content) }
+                        }
                     }
                     messages.add(LlmMessage(Role.TOOL, toolResults = results))
+
+                    if (verdictCall != null) {
+                        val verdict = VerdictGrounding.parse(verdictCall.argumentsJson, toolOutputs)
+                        if (verdict != null) {
+                            // История обязана заканчиваться ходом ассистента, а не tool_result:
+                            // иначе следующий запрос к Anthropic — некорректная последовательность.
+                            val text = verdict.toPlainText()
+                            messages.add(LlmMessage(Role.ASSISTANT, content = text))
+                            onEvent(AgentEvent.Verdict(verdict))
+                            return messages
+                        }
+                        // Мусор вместо JSON — не роняем диалог: пусть модель договорит текстом.
+                    }
                 }
             }
         }
@@ -90,6 +114,9 @@ class DiagnosticAgent(
     companion object {
         const val MAX_STEPS = 12
 
+        /** Терминальный инструмент: не идёт в железо, а завершает диалог вердиктом. */
+        const val SUBMIT_VERDICT = "submit_verdict"
+
         const val SYSTEM_PROMPT: String =
             "Ты — опытный автомеханик-диагност. У тебя есть инструменты для чтения данных " +
                 "автомобиля через OBD-II адаптер ELM327.\n\n" +
@@ -102,21 +129,21 @@ class DiagnosticAgent(
                 "контекст этой машины. Не выдумывай коды, значения и причины. Если данных для вывода " +
                 "не хватает — честно скажи, что нужно измерить, и НЕ придумывай правдоподобный " +
                 "диагноз. Уверенно-неверный вывод про безопасность хуже честного «нужны данные».\n\n" +
-                "ФОРМАТ ИТОГОВОГО ВЕРДИКТА (обязателен, когда ставишь диагноз). Начни ответ РОВНО с " +
-                "одной метки тяжести в квадратных скобках, отдельной строкой:\n" +
-                "[СТАТУС: КРИТИЧНО] — ехать нельзя, риск для двигателя/безопасности (перегрев, падение " +
-                "давления масла, детонация, сильные пропуски с риском катализатора).\n" +
-                "[СТАТУС: ВНИМАНИЕ] — можно аккуратно доехать до сервиса, но откладывать нельзя.\n" +
-                "[СТАТУС: НОРМА] — можно ездить и наблюдать, критичного нет.\n" +
-                "[СТАТУС: НУЖНЫ ДАННЫЕ] — данных недостаточно для вывода.\n" +
-                "После метки — одна короткая строка: что вероятнее всего и можно ли ехать. Затем " +
-                "разделы простым языком:\n" +
-                "• Вероятные причины — по убыванию вероятности, кратко на какие данные опираешься.\n" +
-                "• Что проверить — конкретные шаги ДО замены деталей (не «поменяй катушку», а " +
-                "«проверь X; если Y — тогда катушка»).\n" +
-                "• Своими силами или в сервис — и насколько серьёзна работа.\n" +
-                "Метку ставь по реальным данным, не на всякий случай. При [СТАТУС: НУЖНЫ ДАННЫЕ] — " +
-                "перечисли, что именно снять/измерить.\n\n" +
+                "ИТОГОВЫЙ ВЕРДИКТ — ТОЛЬКО через инструмент submit_verdict, не свободным текстом. " +
+                "Когда готов поставить диагноз, вызови submit_verdict:\n" +
+                "• severity — КРИТИЧНО (ехать нельзя: перегрев, падение давления масла, детонация, " +
+                "сильные пропуски с риском катализатора) / ВНИМАНИЕ (можно аккуратно доехать до " +
+                "сервиса) / НОРМА (можно ездить и наблюдать) / НУЖНЫ ДАННЫЕ (данных не хватает).\n" +
+                "• summary — одна короткая строка: что вероятнее и можно ли ехать.\n" +
+                "• causes — причины по убыванию вероятности; у КАЖДОЙ в evidence перечисли конкретные " +
+                "коды и значения ИЗ ОТВЕТОВ ИНСТРУМЕНТОВ, на которых она стоит. Приложение сверит их " +
+                "с реальными данными адаптера и покажет пользователю, что подтверждено. Ссылка на " +
+                "код, которого не было в ответах, будет помечена как выдумка — не делай так.\n" +
+                "• checks — что проверить ДО замены деталей (не «поменяй катушку», а «проверь X; если " +
+                "Y — тогда катушка»).\n" +
+                "• diy — своими силами или в сервис и насколько серьёзна работа.\n" +
+                "Severity ставь по реальным данным, не на всякий случай. При НУЖНЫ ДАННЫЕ перечисли в " +
+                "checks, что именно снять или измерить.\n\n" +
                 "Постоянные коды (read_permanent_dtcs) не стираются сбросом, пока ЭБУ не убедится в " +
                 "ремонте — если есть, проблема не устранена. Готовность мониторов (read_readiness) — " +
                 "перед техосмотром и после сброса кодов.\n\n" +
@@ -176,6 +203,9 @@ class DiagnosticAgent(
 sealed interface AgentEvent {
     data class Assistant(val text: String) : AgentEvent
     data class ToolCall(val name: String) : AgentEvent
+
+    /** Структурный вердикт с проверенным заземлением — вместо свободного текста. */
+    data class Verdict(val verdict: DiagnosticVerdict) : AgentEvent
 
     /** Расход токенов за один ответ модели. */
     data class Usage(val prompt: Int, val completion: Int) : AgentEvent

@@ -392,6 +392,13 @@ private fun ChatBubble(msg: ChatMessage, onExportPdf: (String) -> Unit) {
         return
     }
 
+    // Структурный вердикт рисуем карточкой триажа, а не текстовым пузырём: в нём видно,
+    // на каких данных стоит вывод и что из этого подтверждено адаптером.
+    msg.verdict?.let { v ->
+        Box(Modifier.fillMaxWidth().padding(vertical = 2.dp)) { VerdictCard(v) }
+        return
+    }
+
     val bg: Color
     val fg: Color
     when (msg.role) {
