@@ -13,7 +13,15 @@ import ru.ngscanner.transport.ObdTransport
  * сериализованы [mutex], иначе кадры двух параллельных команд (опрос приборов
  * и инструменты агента) смешиваются и парсер получает мусор.
  */
-class Elm327(private val transport: ObdTransport) {
+class Elm327(
+    private val transport: ObdTransport,
+    /**
+     * Желаемый протокол шины. [ObdProtocol.AUTO] — автоопределение адаптером (`ATSP0`),
+     * иначе протокол задаётся жёстко: на K-line и «залипающих» клонах это единственный
+     * способ подключиться. Меняется на лету через [setProtocol].
+     */
+    @Volatile var protocol: ObdProtocol = ObdProtocol.AUTO,
+) {
 
     private val mutex = Mutex()
 
@@ -33,51 +41,88 @@ class Elm327(private val transport: ObdTransport) {
         return n
     }
 
+    /** Определившийся протокол (по `ATDPN`); `null`, пока не определён. */
+    suspend fun activeProtocol(): ObdProtocol? = ObdProtocol.fromNumber(protocolNumber())
+
     /**
-     * Является ли текущий протокол CAN (ISO 15765-4). Нужно парсеру DTC: в CAN
+     * Является ли текущий протокол CAN (ISO 15765-4 / J1939). Нужно парсеру DTC: в CAN
      * после `43` идёт байт-счётчик кодов, в легаси (ISO 9141/KWP/J1850) счётчика
      * нет, а по самим байтам форматы неотличимы.
      */
-    suspend fun isCan(): Boolean = (protocolNumber() ?: 0) >= 6
+    suspend fun isCan(): Boolean = activeProtocol()?.isCan == true
 
     /**
      * Длина заголовка CAN-ID в hex-символах при включённых заголовках (ATH1).
      * Нужна для группировки ответов по ЭБУ (иначе кадры разных модулей сливаются
-     * и рождают фантомные коды). 11-bit CAN → 3 (7Ex), 29-bit → 8 (18DAF1xx),
-     * легаси/неизвестно → 0 (группировка не применяется).
+     * и рождают фантомные коды). Легаси/неизвестно → 0 (группировка не применяется).
      */
-    suspend fun headerHexLen(): Int = when (protocolNumber()) {
-        6, 8 -> 3
-        7, 9 -> 8
-        else -> 0
-    }
+    suspend fun headerHexLen(): Int = activeProtocol()?.headerHexLen ?: 0
 
-    /** Человекочитаемое имя протокола ELM327 по номеру; `null`, если ещё не определён. */
-    suspend fun protocolName(): String? = when (protocolNumber()) {
-        1 -> "SAE J1850 PWM"
-        2 -> "SAE J1850 VPW"
-        3 -> "ISO 9141-2"
-        4 -> "ISO 14230 KWP (5 baud)"
-        5 -> "ISO 14230 KWP (fast)"
-        6 -> "CAN 11-bit, 500 кбит"
-        7 -> "CAN 29-bit, 500 кбит"
-        8 -> "CAN 11-bit, 250 кбит"
-        9 -> "CAN 29-bit, 250 кбит"
-        else -> null
-    }
+    /** Человекочитаемое имя протокола; `null`, если ещё не определён. */
+    suspend fun protocolName(): String? = activeProtocol()?.label
 
     /**
-     * Перезапускает автоопределение протокола (`ATSP0`) и триггерит автопоиск пробным
-     * запросом. Нужно, когда ELM327-клон «залип» на неудачном автопоиске и упорно
-     * отдаёт NO DATA, хотя ЭБУ на связи. Сбрасывает кэш номера протокола.
+     * Перезапускает связь на текущем желаемом протоколе ([protocol]) и триггерит
+     * подключение пробным запросом. Нужно, когда ELM327-клон «залип» на неудачном
+     * автопоиске и упорно отдаёт NO DATA, хотя ЭБУ на связи. Сбрасывает кэш номера.
      */
     suspend fun resetProtocol() = mutex.withLock {
         protocolNum = null
-        transport.write("ATSP0")
+        transport.write("ATSP${protocol.code}")
         transport.readResponse()
         delay(60)
-        transport.write("0100") // любой OBD-запрос запускает автопоиск заново
+        transport.write("0100") // любой OBD-запрос запускает подключение заново
         transport.readResponse()
+    }
+
+    /**
+     * Переключает протокол на лету (без переподключения адаптера) и проверяет, отвечает
+     * ли ЭБУ. `true` — на этом протоколе связь есть.
+     */
+    suspend fun setProtocol(p: ObdProtocol): Boolean {
+        protocol = p
+        mutex.withLock {
+            protocolNum = null
+            transport.write("ATSP${p.code}")
+            transport.readResponse()
+            delay(60)
+        }
+        return probe()
+    }
+
+    /**
+     * Перебирает протоколы и возвращает те, на которых ЭБУ реально ответил. Это ответ на
+     * вопрос «почему не подключается»: автопоиск адаптера — чёрный ящик, а здесь видно,
+     * что именно пробовали и что откликнулось. По окончании возвращает адаптер на
+     * [protocol] (желаемый), чтобы зонд не оставил связь в чужом состоянии.
+     *
+     * @param onStep вызывается перед каждой пробой — для показа прогресса в UI
+     */
+    suspend fun probeProtocols(onStep: (ObdProtocol) -> Unit = {}): List<ObdProtocol> {
+        val found = mutableListOf<ObdProtocol>()
+        for (p in ObdProtocol.PROBE_ORDER) {
+            onStep(p)
+            mutex.withLock {
+                protocolNum = null
+                transport.write("ATSP${p.code}")
+                transport.readResponse()
+                delay(60)
+            }
+            if (probe()) found.add(p)
+        }
+        // Возвращаем адаптер к желаемому протоколу — иначе останется последний пробный.
+        mutex.withLock {
+            protocolNum = null
+            transport.write("ATSP${protocol.code}")
+            transport.readResponse()
+        }
+        return found
+    }
+
+    /** Отвечает ли ЭБУ прямо сейчас: любой валидный ответ на 0100 (маска PID). */
+    private suspend fun probe(): Boolean {
+        val raw = command("0100").uppercase()
+        return raw.contains("41 00") || raw.replace(" ", "").contains("4100")
     }
 
     /**
@@ -92,7 +137,8 @@ class Elm327(private val transport: ObdTransport) {
         protocolNum = null
         var sawResponse = false
         var athRejected = false
-        for (cmd in INIT_SEQUENCE) {
+        // Протокол ставится последней командой: AUTO → ATSP0, иначе жёстко выбранный.
+        for (cmd in INIT_SEQUENCE + "ATSP${protocol.code}") {
             transport.write(cmd)
             val resp = transport.readResponse().uppercase()
             if (resp.isNotBlank()) sawResponse = true
@@ -173,6 +219,7 @@ class Elm327(private val transport: ObdTransport) {
         /** ATZ — сброс; ATE0 — эхо выкл; ATL0 — переводы строк выкл; ATS0 — пробелы
          *  выкл; ATH1 — показывать заголовки (CAN-ID), чтобы различать ЭБУ в ответах;
          *  ATSP0 — автоопределение протокола. */
-        val INIT_SEQUENCE = listOf("ATZ", "ATE0", "ATL0", "ATS0", "ATH1", "ATSP0")
+        // Протокол (ATSP) добавляется в initialize() из выбранного пользователем.
+        val INIT_SEQUENCE = listOf("ATZ", "ATE0", "ATL0", "ATS0", "ATH1")
     }
 }

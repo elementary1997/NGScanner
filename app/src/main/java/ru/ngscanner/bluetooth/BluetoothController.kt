@@ -4,6 +4,9 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -17,6 +20,7 @@ class BluetoothController(context: Context) {
     private val adapter: BluetoothAdapter? get() = manager?.adapter
 
     private var receiver: BroadcastReceiver? = null
+    private var leCallback: ScanCallback? = null
 
     val isAvailable: Boolean get() = adapter != null
     val isEnabled: Boolean get() = adapter?.isEnabled == true
@@ -42,6 +46,11 @@ class BluetoothController(context: Context) {
      * Запускает поиск видимых (ещё не сопряжённых) устройств. [onFound] вызывается
      * на каждое найденное устройство, [onFinished] — по завершении поиска.
      * Требует `BLUETOOTH_SCAN` (Android 12+) или геолокацию (до Android 12).
+     *
+     * Ищем ОБОИМИ способами сразу: классический инквайр (BR/EDR) находит только
+     * SPP-адаптеры, а BLE-адаптеры (Vgate iCar Pro BLE, OBDLink CX, клоны на HM-10)
+     * видны исключительно через LE-сканер. Раньше искали только классику — и такие
+     * адаптеры не появлялись в списке вовсе.
      */
     @SuppressLint("MissingPermission")
     fun startDiscovery(onFound: (BluetoothDevice) -> Unit, onFinished: () -> Unit) {
@@ -51,6 +60,7 @@ class BluetoothController(context: Context) {
             return
         }
         cancelDiscovery()
+        startLeScan(a, onFound)
         val r = object : BroadcastReceiver() {
             @Suppress("DEPRECATION")
             override fun onReceive(context: Context, intent: Intent) {
@@ -82,10 +92,41 @@ class BluetoothController(context: Context) {
         }
     }
 
-    /** Останавливает поиск и снимает приёмник событий. */
+    /**
+     * LE-сканирование параллельно классическому инквайру. Идёт до [cancelDiscovery]:
+     * своего «завершения» у него нет, поэтому окончанием поиска считается завершение
+     * классического инквайра (он ограничен по времени системой).
+     */
+    @SuppressLint("MissingPermission")
+    private fun startLeScan(a: BluetoothAdapter, onFound: (BluetoothDevice) -> Unit) {
+        val scanner = runCatching { a.bluetoothLeScanner }.getOrNull() ?: return
+        val cb = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                runCatching { onFound(result.device) }
+            }
+
+            override fun onBatchScanResults(results: MutableList<ScanResult>) {
+                results.forEach { r -> runCatching { onFound(r.device) } }
+            }
+        }
+        // LOW_LATENCY: адаптер должен найтись за секунды, а не за полминуты.
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+        // Без BLUETOOTH_SCAN startScan бросает SecurityException — не падаем, просто
+        // остаёмся с классическим поиском.
+        val started = runCatching { scanner.startScan(null, settings, cb) }.isSuccess
+        leCallback = if (started) cb else null
+    }
+
+    /** Останавливает оба поиска (классический и LE) и снимает приёмник событий. */
     @SuppressLint("MissingPermission")
     fun cancelDiscovery() {
         runCatching { adapter?.cancelDiscovery() }
+        leCallback?.let { cb ->
+            runCatching { adapter?.bluetoothLeScanner?.stopScan(cb) }
+        }
+        leCallback = null
         receiver?.let { r -> runCatching { appContext.unregisterReceiver(r) } }
         receiver = null
     }

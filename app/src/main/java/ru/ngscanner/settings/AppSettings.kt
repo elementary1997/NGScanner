@@ -91,6 +91,14 @@ class AppSettings(context: Context) {
         get() = runCatching { prefs.getLong(KEY_POLL_INTERVAL, DEFAULT_POLL_MS) }.getOrDefault(DEFAULT_POLL_MS)
         set(value) { runCatching { prefs.edit().putLong(KEY_POLL_INTERVAL, value).apply() } }
 
+    /**
+     * Протокол шины OBD (код `ATSP`). По умолчанию «0» — автоопределение адаптером;
+     * жёсткий выбор нужен на K-line и клонах, где автопоиск не срабатывает.
+     */
+    var obdProtocol: String
+        get() = runCatching { prefs.getString(KEY_OBD_PROTOCOL, "0") }.getOrNull() ?: "0"
+        set(value) { runCatching { prefs.edit().putString(KEY_OBD_PROTOCOL, value).apply() } }
+
     /** Цена топлива, ₽/л (0 = не задана). SharedPreferences не держит Double — храним Float. */
     var fuelPrice: Double
         get() = runCatching { prefs.getFloat(KEY_FUEL_PRICE, 0f).toDouble() }.getOrDefault(0.0)
@@ -156,6 +164,7 @@ class AppSettings(context: Context) {
         private const val KEY_KEEP_SCREEN = "keep_screen_on"
         private const val KEY_UPDATE_CHECK = "update_check"
         private const val KEY_POLL_INTERVAL = "poll_interval_ms"
+        private const val KEY_OBD_PROTOCOL = "obd_protocol"
         private const val KEY_FUEL_PRICE = "fuel_price"
         const val DEFAULT_MODEL = "claude-opus-4-8"
 

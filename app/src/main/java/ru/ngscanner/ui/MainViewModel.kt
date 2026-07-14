@@ -2,6 +2,7 @@ package ru.ngscanner.ui
 
 import android.annotation.SuppressLint
 import android.app.Application
+import android.bluetooth.BluetoothDevice
 import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
@@ -59,6 +60,7 @@ import ru.ngscanner.obd.Elm327
 import ru.ngscanner.obd.FuelCalc
 import ru.ngscanner.obd.ObdParser
 import ru.ngscanner.obd.ObdPid
+import ru.ngscanner.obd.ObdProtocol
 import ru.ngscanner.perf.PerfCalc
 import ru.ngscanner.perf.PerfKind
 import ru.ngscanner.perf.PerfPhase
@@ -81,7 +83,9 @@ import ru.ngscanner.settings.SessionSummary
 import ru.ngscanner.settings.UsageRepository
 import ru.ngscanner.update.AppUpdater
 import ru.ngscanner.update.UpdateInfo
+import ru.ngscanner.transport.BleTransport
 import ru.ngscanner.transport.ClassicSppTransport
+import ru.ngscanner.transport.ObdTransport
 import ru.ngscanner.trips.Trip
 import ru.ngscanner.trips.TripKind
 import ru.ngscanner.trips.TripMeta
@@ -139,6 +143,11 @@ data class UiState(
     val ecuResponding: Boolean = false,
     // определённый протокол связи (CAN 500k / ISO 14230 KWP…); null — ещё не определён
     val ecuProtocol: String? = null,
+    // Желаемый протокол шины (AUTO = автоопределение адаптером) и результаты зонда.
+    val obdProtocol: ObdProtocol = ObdProtocol.AUTO,
+    val protocolProbing: Boolean = false,
+    val protocolProbeStep: ObdProtocol? = null,
+    val protocolProbeResult: List<ObdProtocol>? = null,
     // история значений с временными метками для графиков (последние точки на параметр)
     val history: Map<ObdPid, List<MetricSample>> = emptyMap(),
     // чтение кодов неисправностей (Mode 03/07/0A) для экрана «Коды»
@@ -262,6 +271,7 @@ private class LoadedState(
     val reports: List<ReportMeta>,
     val perfRuns: List<PerfRun>,
     val customPids: List<CustomPid>,
+    val obdProtocol: ObdProtocol,
 )
 
 /**
@@ -298,7 +308,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val recordedPids = LinkedHashSet<String>()
     private var prevCritical = emptySet<ObdPid>()
 
-    private var transport: ClassicSppTransport? = null
+    private var transport: ObdTransport? = null
     private var elm: Elm327? = null
     private var pollJob: Job? = null
     private var diagnoseJob: Job? = null
@@ -350,6 +360,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     reports = reportRepo.metas(),
                     perfRuns = perfRepo.runs(),
                     customPids = customPidRepo.all(),
+                    obdProtocol = ObdProtocol.fromCode(settings.obdProtocol),
                 )
             }
             if (llmHistory.isEmpty()) llmHistory = loaded.history
@@ -386,6 +397,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     reports = if (cur.reports == empty.reports) loaded.reports else cur.reports,
                     perfRuns = if (cur.perfRuns == empty.perfRuns) loaded.perfRuns else cur.perfRuns,
                     customPids = if (cur.customPids == empty.customPids) loaded.customPids else cur.customPids,
+                    obdProtocol = if (cur.obdProtocol == empty.obdProtocol) loaded.obdProtocol else cur.obdProtocol,
                     // Настройки поведения и версия: тумблеры редко трогают за время загрузки,
                     // а сеттеры пишут и на диск, и в состояние — вливаем значения с диска.
                     batteryGuard = loaded.batteryGuard,
@@ -461,18 +473,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Выбирает транспорт по типу устройства — ровно та точка расширения, ради которой
+     * заведён [ObdTransport] (ADR 0001): BLE-адаптеры (Vgate iCar Pro BLE, OBDLink CX,
+     * клоны на HM-10) не поднимают RFCOMM, а классические не говорят по GATT. Для
+     * DUAL предпочитаем классику: SPP надёжнее и быстрее GATT.
+     */
+    @SuppressLint("MissingPermission")
+    private fun buildTransport(device: BluetoothDevice): ObdTransport {
+        val isLeOnly = runCatching { device.type == BluetoothDevice.DEVICE_TYPE_LE }.getOrDefault(false)
+        return if (isLeOnly) BleTransport(getApplication(), device) else ClassicSppTransport(device)
+    }
+
     @SuppressLint("MissingPermission")
     fun connect(address: String) {
         val device = controller.deviceByAddress(address) ?: return
         controller.cancelDiscovery()
         _ui.update { it.copy(connection = ConnectionState.Connecting, error = null, scanning = false) }
         viewModelScope.launch {
-            var fresh: ClassicSppTransport? = null
+            var fresh: ObdTransport? = null
             try {
-                val t = ClassicSppTransport(device)
+                val t = buildTransport(device)
                 t.connect()
                 fresh = t
-                val e = Elm327(t)
+                val e = Elm327(t, ObdProtocol.fromCode(settings.obdProtocol))
                 e.initialize()
                 supportedPids = runCatching { e.readSupportedPids() }.getOrDefault(emptySet())
                 transport = t
@@ -860,13 +884,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 delay(delayMs)
                 if (!reconnecting) return@launch
                 val device = controller.deviceByAddress(address)
-                var fresh: ClassicSppTransport? = null
+                var fresh: ObdTransport? = null
                 val ok = device != null && runCatching {
                     transport?.close()
-                    val t = ClassicSppTransport(device)
+                    val t = buildTransport(device)
                     t.connect()
                     fresh = t
-                    val e = Elm327(t)
+                    val e = Elm327(t, ObdProtocol.fromCode(settings.obdProtocol))
                     e.initialize()
                     supportedPids = runCatching { e.readSupportedPids() }.getOrDefault(emptySet())
                     transport = t
@@ -1624,6 +1648,58 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (uri != null) Exporter.shareMarkdown(app, uri)
             else Toast.makeText(app, "Не удалось создать файл", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // ---- Протокол шины OBD ----
+
+    /**
+     * Меняет протокол связи. Настройка запоминается и применяется при следующем
+     * подключении; если адаптер уже на связи — переключаем на лету и сразу проверяем,
+     * отвечает ли ЭБУ (иначе пользователь узнал бы об ошибке только после реконнекта).
+     */
+    fun setObdProtocol(p: ObdProtocol) {
+        settings.obdProtocol = p.code
+        _ui.update { it.copy(obdProtocol = p, protocolProbeResult = null) }
+        val e = elm ?: return
+        val wasPolling = pollJob?.isActive == true
+        stopPolling()
+        viewModelScope.launch {
+            val ok = runCatching { e.setProtocol(p) }.getOrDefault(false)
+            val name = runCatching { e.protocolName() }.getOrNull()
+            _ui.update {
+                it.copy(
+                    ecuResponding = ok,
+                    ecuProtocol = name,
+                    error = if (ok) null else "На протоколе «${p.label}» ЭБУ не отвечает. " +
+                        "Попробуйте «Определить протокол» или верните автоопределение.",
+                )
+            }
+            if (wasPolling && elm != null) startPolling()
+        }
+    }
+
+    /**
+     * Перебирает протоколы и показывает, на каких ЭБУ реально ответил, — прямой ответ на
+     * «почему не подключается». Опрос на это время останавливается: зонд дёргает шину.
+     */
+    fun probeProtocols() {
+        val e = elm ?: run {
+            _ui.update { it.copy(error = "Сначала подключите адаптер.") }
+            return
+        }
+        if (_ui.value.protocolProbing) return
+        val wasPolling = pollJob?.isActive == true
+        stopPolling()
+        _ui.update { it.copy(protocolProbing = true, protocolProbeResult = null, protocolProbeStep = null) }
+        viewModelScope.launch {
+            val found = runCatching {
+                e.probeProtocols { p -> _ui.update { it.copy(protocolProbeStep = p) } }
+            }.getOrDefault(emptyList())
+            _ui.update {
+                it.copy(protocolProbing = false, protocolProbeStep = null, protocolProbeResult = found)
+            }
+            if (wasPolling && elm != null) startPolling()
         }
     }
 

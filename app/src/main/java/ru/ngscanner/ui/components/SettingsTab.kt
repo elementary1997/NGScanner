@@ -220,6 +220,14 @@ internal fun SettingsTab(
         }
 
         CollapsibleCard(
+            title = "Протокол OBD",
+            summary = ui.obdProtocol.label + (ui.ecuProtocol?.let { " · на связи: $it" } ?: ""),
+            initiallyExpanded = false,
+        ) {
+            ProtocolContent(ui, vm)
+        }
+
+        CollapsibleCard(
             title = "Свои PID (заводские)",
             summary = if (ui.customPids.isEmpty()) "не заданы" else "${ui.customPids.size} шт.",
             initiallyExpanded = false,
