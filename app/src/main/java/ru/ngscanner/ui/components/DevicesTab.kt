@@ -27,7 +27,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.BluetoothSearching
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothConnected
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.ShowChart
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
@@ -78,6 +80,10 @@ internal fun DevicesTab(
     onClearDtc: () -> Unit,
     onExplainDtc: (ru.ngscanner.ui.DtcItem) -> Unit,
     onReadFreezeFrame: () -> Unit,
+    onStartPerf: (ru.ngscanner.perf.PerfKind) -> Unit,
+    onRestartPerf: () -> Unit,
+    onStopPerf: () -> Unit,
+    onDeletePerfRun: (String) -> Unit,
 ) {
     // Имя открытого параметра (String сохраняется в Bundle → график переживает поворот).
     var graphName by rememberSaveable { mutableStateOf<String?>(null) }
@@ -87,6 +93,8 @@ internal fun DevicesTab(
     var showTrips by rememberSaveable { mutableStateOf(false) }
     // Открыт ли экран кодов неисправностей.
     var showDtc by rememberSaveable { mutableStateOf(false) }
+    // Открыт ли экран перф-замеров (нужно соединение — скорость читается с ЭБУ).
+    var showPerf by rememberSaveable { mutableStateOf(false) }
     // При обрыве связи закрываем график, иначе при авто-реконнекте early-return
     // прыгнул бы сразу в него, минуя дашборд.
     LaunchedEffect(ui.connection) {
@@ -136,6 +144,21 @@ internal fun DevicesTab(
         )
         return
     }
+    // Экран перф-замеров: держит быстрый опрос скорости, поэтому только на связи.
+    if (showPerf && ui.connection == ConnectionState.Connected) {
+        BackHandler { if (ui.perfKind != null) onStopPerf() else showPerf = false }
+        PerfScreen(
+            kind = ui.perfKind,
+            state = ui.perfState,
+            runs = ui.perfRuns,
+            onBack = { showPerf = false },
+            onStart = onStartPerf,
+            onRestart = onRestartPerf,
+            onStop = onStopPerf,
+            onDeleteRun = onDeletePerfRun,
+        )
+        return
+    }
     // При активном соединении — приборы и графики на двух свайпаемых панелях; иначе
     // (нет данных для графиков) прежний одиночный экран со статусом и избранными.
     if (ui.connection == ConnectionState.Connected) {
@@ -151,6 +174,7 @@ internal fun DevicesTab(
             onSetDashboardPids = onSetDashboardPids,
             onOpenTrips = { showTrips = true },
             onOpenDtc = { showDtc = true },
+            onOpenPerf = { showPerf = true },
         )
     } else {
         Column(
@@ -187,6 +211,7 @@ private fun DevicesConnected(
     onSetDashboardPids: (List<String>) -> Unit,
     onOpenTrips: () -> Unit,
     onOpenDtc: () -> Unit,
+    onOpenPerf: () -> Unit,
 ) {
     val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
@@ -207,6 +232,8 @@ private fun DevicesConnected(
                 ) {
                     Spacer(Modifier.height(4.dp))
                     FuelCard(ui.instantLper100, ui.instantLperH, ui.tripAvgLper100, ui.tripFuelLiters, ui.fuelPrice)
+                    PerfEntryCard(onOpenPerf)
+                    CustomPidCard(ui.customPids, ui.customValues)
                     Dashboard(ui.metrics, ui.history, ui.supportedPids, ui.dashboardPids, onDisconnect, onOpenGraph, onOpenDtc, onSetDashboardPids)
                     ui.error?.let { ErrorCard(it) }
                     Spacer(Modifier.height(16.dp))
@@ -223,6 +250,28 @@ private fun DevicesConnected(
                     onOpenTrips = onOpenTrips,
                 )
             }
+        }
+    }
+}
+
+/** Вход в перф-замеры (0–100, торможение, ¼ мили) с панели приборов. */
+@Composable
+private fun PerfEntryCard(onOpen: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    ElevatedCard(onClick = onOpen, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Timer, null, Modifier.size(22.dp), tint = cs.primary)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Замеры", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "Разгон 0–100, торможение 100–0, ¼ мили",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant,
+                )
+            }
+            Icon(Icons.Rounded.ChevronRight, null, tint = cs.onSurfaceVariant)
         }
     }
 }

@@ -351,6 +351,26 @@ object ObdParser {
     }
 
     /**
+     * Байты данных ответа на произвольную команду [cmd] (мода + PID в hex) — обобщение
+     * [dataBytes] на моды, отличные от 01: заводские PID производителя живут в моде 21/22.
+     * ЭБУ отвечает заголовком «мода + 0x40» и теми же байтами PID (0x21 → 0x61,
+     * 0x22 → 0x62), после чего идут данные. `null`, если такого ответа в строке нет.
+     */
+    fun dataBytesFor(raw: String, cmd: String): IntArray? {
+        val c = cmd.uppercase().filter { !it.isWhitespace() }
+        if (c.length < 4 || c.length % 2 != 0) return null
+        val mode = c.substring(0, 2).toIntOrNull(16) ?: return null
+        if (c.drop(2).any { it !in '0'..'9' && it !in 'A'..'F' }) return null
+        val prefix = "%02X".format(mode + 0x40) + c.substring(2)
+        val hex = normalize(raw)
+        val idx = hex.indexOf(prefix)
+        if (idx < 0) return null
+        val dataHex = hex.substring(idx + prefix.length)
+        if (dataHex.length < 2) return null
+        return dataHex.chunked(2).filter { it.length == 2 }.map { it.toInt(16) }.toIntArray()
+    }
+
+    /**
      * Байты данных из ответа Mode 02 (freeze frame) — заголовок «42» + суффикс PID.
      * Формат ответа: `42 PID FRAME# data…`, поэтому после «42{PID}» пропускаем
      * байт номера кадра (frame#), иначе значение читается со сдвигом на байт.

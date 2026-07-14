@@ -128,6 +128,15 @@ class Elm327(private val transport: ObdTransport) {
     }
 
     /**
+     * Прочитать и декодировать заводской PID пользователя (мода 21/22 и т.п.).
+     * `null`, если ЭБУ не ответил на команду или ответ короче, чем ждёт [pid].
+     */
+    suspend fun readCustom(pid: CustomPid): Double? {
+        val data = ObdParser.dataBytesFor(command(pid.cmd), pid.cmd) ?: return null
+        return runCatching { pid.decode(data) }.getOrNull()
+    }
+
+    /**
      * Набор команд PID Mode 01, которые поддерживает данный автомобиль
      * (по маскам 0100/0120/0140). Пустой набор — не удалось определить.
      */

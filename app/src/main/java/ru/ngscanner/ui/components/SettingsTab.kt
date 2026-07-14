@@ -220,6 +220,18 @@ internal fun SettingsTab(
         }
 
         CollapsibleCard(
+            title = "Свои PID (заводские)",
+            summary = if (ui.customPids.isEmpty()) "не заданы" else "${ui.customPids.size} шт.",
+            initiallyExpanded = false,
+        ) {
+            CustomPidsContent(
+                pids = ui.customPids,
+                onSave = vm::setCustomPid,
+                onDelete = vm::deleteCustomPid,
+            )
+        }
+
+        CollapsibleCard(
             title = "Обновление приложения",
             summary = ui.updateInfo?.let { "доступна ${it.version}" } ?: "версия ${ui.appVersion}",
             initiallyExpanded = ui.updateInfo != null,

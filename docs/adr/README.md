@@ -13,6 +13,8 @@
 |------|---------|--------|
 | [0001](0001-key-architecture-decisions.md) | Ключевые архитектурные решения: свой app + Claude API, абстракции транспорта и провайдера, нативный Android | Принято |
 | [0002](0002-http-llm-providers.md) | LLM-провайдеры (Claude, Cloud.ru) через HTTP вместо Anthropic SDK | Принято |
+| [0003](0003-vin-decoding-offline-first.md) | Разбор VIN: офлайн-первый, детали ВАЗ из vininfo, vPIC-резерв | Принято |
+| [0004](0004-manufacturer-pids-user-defined.md) | Заводские PID (мода 21/22): не сочиняем каталог, задаёт пользователь | Принято |
 
 ## Как добавить запись
 

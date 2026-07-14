@@ -52,11 +52,19 @@ import ru.ngscanner.llm.LlmProvider
 import ru.ngscanner.llm.ProviderId
 import ru.ngscanner.llm.ToolCall
 import ru.ngscanner.llm.LlmException
+import ru.ngscanner.obd.CustomPid
+import ru.ngscanner.obd.CustomPidRepository
 import ru.ngscanner.obd.DtcDatabase
 import ru.ngscanner.obd.Elm327
 import ru.ngscanner.obd.FuelCalc
 import ru.ngscanner.obd.ObdParser
 import ru.ngscanner.obd.ObdPid
+import ru.ngscanner.perf.PerfCalc
+import ru.ngscanner.perf.PerfKind
+import ru.ngscanner.perf.PerfPhase
+import ru.ngscanner.perf.PerfRepository
+import ru.ngscanner.perf.PerfRun
+import ru.ngscanner.perf.PerfState
 import ru.ngscanner.report.DiagnosticReport
 import ru.ngscanner.report.ReportMeta
 import ru.ngscanner.report.ReportRepository
@@ -215,6 +223,13 @@ data class UiState(
     val reports: List<ReportMeta> = emptyList(),
     val reportGenerating: Boolean = false,
     val reportError: String? = null,
+    // Перф-замеры: текущий (kind непусто = замер открыт) и сохранённые заезды.
+    val perfKind: PerfKind? = null,
+    val perfState: PerfState? = null,
+    val perfRuns: List<PerfRun> = emptyList(),
+    // Заводские PID пользователя и их последние значения (id -> значение).
+    val customPids: List<CustomPid> = emptyList(),
+    val customValues: Map<String, Double> = emptyMap(),
     val normLoadingPid: String? = null,
     // ожидается подтверждение сброса кодов (Mode 04)
     val clearDtcsPending: Boolean = false,
@@ -245,6 +260,8 @@ private class LoadedState(
     val appVersion: String,
     val fuelPrice: Double,
     val reports: List<ReportMeta>,
+    val perfRuns: List<PerfRun>,
+    val customPids: List<CustomPid>,
 )
 
 /**
@@ -265,6 +282,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val usageRepo = UsageRepository(app)
     private val tripRepo = TripRepository(app)
     private val reportRepo = ReportRepository(app)
+    private val perfRepo = PerfRepository(app)
+    private val customPidRepo = CustomPidRepository(app)
 
     // Запись поездки: буфер синхронных снимков и её старт; чёрный ящик — детект
     // перехода параметров в критическую зону для сохранения окна вокруг события.
@@ -284,6 +303,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var pollJob: Job? = null
     private var diagnoseJob: Job? = null
     private var searchJob: Job? = null
+    private var perfJob: Job? = null
     private val favoritesMutex = Mutex() // упорядочивает запись избранного на диск
     private var clearConfirm: CompletableDeferred<Boolean>? = null
     private var supportedPids: Set<String> = emptySet()
@@ -328,6 +348,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     appVersion = AppUpdater.currentVersion(app),
                     fuelPrice = settings.fuelPrice,
                     reports = reportRepo.metas(),
+                    perfRuns = perfRepo.runs(),
+                    customPids = customPidRepo.all(),
                 )
             }
             if (llmHistory.isEmpty()) llmHistory = loaded.history
@@ -362,6 +384,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     dashboardPids = if (cur.dashboardPids == empty.dashboardPids) loaded.dashboardPids else cur.dashboardPids,
                     tripMetas = if (cur.tripMetas == empty.tripMetas) loaded.tripMetas else cur.tripMetas,
                     reports = if (cur.reports == empty.reports) loaded.reports else cur.reports,
+                    perfRuns = if (cur.perfRuns == empty.perfRuns) loaded.perfRuns else cur.perfRuns,
+                    customPids = if (cur.customPids == empty.customPids) loaded.customPids else cur.customPids,
                     // Настройки поведения и версия: тумблеры редко трогают за время загрузки,
                     // а сеттеры пишут и на диск, и в состояние — вливаем значения с диска.
                     batteryGuard = loaded.batteryGuard,
@@ -494,10 +518,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 for (pid in pids) {
                     runCatching { e.read(pid) }.getOrNull()?.let { ecuValues[pid] = it }
                 }
+                // Заводские PID пользователя (мода 21/22): отдельная карта — они не входят
+                // в каталог ObdPid и не участвуют в графиках/поездках/чёрном ящике.
+                val custom = LinkedHashMap<String, Double>()
+                for (cp in _ui.value.customPids) {
+                    runCatching { e.readCustom(cp) }.getOrNull()?.let { custom[cp.id] = it }
+                }
                 // Напряжение — командой адаптера ATRV; работает и БЕЗ ЭБУ, поэтому в
                 // признак «ЭБУ отвечает» не входит, но на дашборд/в историю попадает.
                 val merged = LinkedHashMap(ecuValues)
                 runCatching { e.readAdapterVoltage() }.getOrNull()?.let { merged[ObdPid.VOLTAGE] = it }
+                if (custom.isNotEmpty()) _ui.update { it.copy(customValues = it.customValues + custom) }
                 val now = System.currentTimeMillis()
                 if (merged.isNotEmpty()) {
                     _ui.update { state ->
@@ -791,6 +822,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // Агент-диагност захватил ссылку на elm в момент запроса — без отмены он
         // продолжил бы дёргать инструменты через закрытый сокет и жечь токены API.
         diagnoseJob?.cancel()
+        // Замер тоже держит elm в тесном цикле — иначе продолжит читать закрытый сокет.
+        perfJob?.cancel()
+        perfJob = null
         lastAddress = null
         stopPolling()
         finishTripRecording() // сохраняем поездку до сброса состояния
@@ -807,6 +841,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 supportedPids = emptySet(),
                 ecuResponding = false,
                 ecuProtocol = null,
+                perfKind = null,
+                perfState = null,
             )
         }
     }
@@ -1591,6 +1627,89 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- Заводские PID пользователя ----
+
+    /** Добавляет/меняет заводской PID. Невалидную команду не сохраняем. */
+    fun setCustomPid(pid: CustomPid) {
+        if (!pid.isValid() || pid.name.isBlank()) return
+        _ui.update { it.copy(customPids = customPidRepo.upsert(pid)) }
+    }
+
+    fun deleteCustomPid(id: String) {
+        _ui.update {
+            it.copy(customPids = customPidRepo.delete(id), customValues = it.customValues - id)
+        }
+    }
+
+    // ---- Перф-замеры (разгон / торможение / ¼ мили) ----
+
+    /**
+     * Открывает замер и запускает быстрый опрос ТОЛЬКО скорости (010D). Обычный опрос
+     * приборов на это время останавливается: half-duplex ELM327 не может обслуживать
+     * весь дашборд и при этом отдавать скорость достаточно часто для секундомера.
+     */
+    fun startPerf(kind: PerfKind) {
+        val e = elm ?: run {
+            _ui.update { it.copy(error = "Сначала подключите адаптер.") }
+            return
+        }
+        perfJob?.cancel()
+        val calc = PerfCalc(kind)
+        _ui.update { it.copy(perfKind = kind, perfState = PerfState(PerfPhase.ARMING)) }
+        val wasPolling = pollJob?.isActive == true
+        stopPolling()
+        perfJob = viewModelScope.launch {
+            try {
+                while (isActive) {
+                    val v = runCatching { e.read(ObdPid.SPEED) }.getOrNull()
+                    if (v == null) {
+                        // Промах чтения — не сэмпл: подмешивать «дырку» в таймер нельзя.
+                        delay(PERF_RETRY_MS)
+                        continue
+                    }
+                    val state = calc.sample(System.currentTimeMillis(), v)
+                    _ui.update { it.copy(perfState = state) }
+                    if (state.phase == PerfPhase.DONE) {
+                        state.resultSec?.let { sec -> savePerfRun(kind, sec, state.trapSpeedKmh) }
+                        break
+                    }
+                    // Без delay: гоним опрос так быстро, как отвечает адаптер (~10–20 Гц).
+                }
+            } finally {
+                if (wasPolling && elm != null) startPolling()
+            }
+        }
+    }
+
+    /** Перезапускает текущий замер с нуля (кнопка «Ещё раз»). */
+    fun restartPerf() {
+        _ui.value.perfKind?.let { startPerf(it) }
+    }
+
+    /** Закрывает замер и возвращает обычный опрос приборов. */
+    fun stopPerf() {
+        perfJob?.cancel()
+        perfJob = null
+        _ui.update { it.copy(perfKind = null, perfState = null) }
+        if (elm != null) startPolling()
+    }
+
+    fun deletePerfRun(id: String) {
+        _ui.update { it.copy(perfRuns = perfRepo.delete(id)) }
+    }
+
+    private fun savePerfRun(kind: PerfKind, seconds: Double, trapSpeedKmh: Double?) {
+        val run = PerfRun(
+            id = PerfRepository.newId(),
+            kind = kind,
+            dateIso = LocalDate.now().toString(),
+            seconds = seconds,
+            trapSpeedKmh = trapSpeedKmh,
+            carTitle = _ui.value.garage.activeCar?.title.orEmpty(),
+        )
+        _ui.update { it.copy(perfRuns = perfRepo.add(run)) }
+    }
+
     /** Экспорт протокола в PDF и системный «Поделиться». */
     fun shareReportPdf(id: String) {
         viewModelScope.launch {
@@ -1796,6 +1915,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 "если вердикт не выведен — statusLabel=НУЖНЫ ДАННЫЕ."
 
         private const val TAG = "MainViewModel"
+        private const val PERF_RETRY_MS = 50L // пауза после промаха чтения скорости в замере
         private const val POLL_INTERVAL_MS = 1500L
         private const val POLL_IDLE_MS = 5000L
         private const val IDLE_THRESHOLD = 4

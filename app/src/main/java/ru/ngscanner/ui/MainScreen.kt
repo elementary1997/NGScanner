@@ -174,6 +174,10 @@ fun MainScreen(vm: MainViewModel) {
                         onClearDtc = vm::clearDtcCodes,
                         onExplainDtc = { item -> vm.explainDtc(item); goToTab(Tab.Chat) },
                         onReadFreezeFrame = vm::readFreezeFrame,
+                        onStartPerf = vm::startPerf,
+                        onRestartPerf = vm::restartPerf,
+                        onStopPerf = vm::stopPerf,
+                        onDeletePerfRun = vm::deletePerfRun,
                     )
                     Tab.Chat -> ChatTab(
                         ui,
