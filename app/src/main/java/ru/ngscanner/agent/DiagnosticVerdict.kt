@@ -46,6 +46,12 @@ data class DiagnosticVerdict(
     val causes: List<VerdictCause> = emptyList(),
     val checks: List<String> = emptyList(),
     val diy: String = "",
+    /**
+     * Предупреждение, если детерминированный движок правил (второе мнение по бортовым
+     * данным) оказался строже модели. Правила нельзя уговорить: «можно ехать» при
+     * перегреве не должно проходить незаметно.
+     */
+    val crossCheck: String? = null,
 ) {
     /** Модель сослалась на код, которого адаптер не отдавал, — красный флаг. */
     val hasContradiction: Boolean

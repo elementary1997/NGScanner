@@ -70,6 +70,9 @@ internal fun VerdictCard(v: DiagnosticVerdict) {
                 Text(v.summary, style = MaterialTheme.typography.bodyLarge, color = cs.onSurface, lineHeight = 22.sp)
             }
 
+            // Второе мнение движка правил — важнее вердикта модели: правила не галлюцинируют.
+            v.crossCheck?.let { VerdictWarning(it, cs.error) }
+
             // Предупреждения о качестве самого вывода — важнее, чем сам вывод.
             if (v.hasContradiction) {
                 VerdictWarning(

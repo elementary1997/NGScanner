@@ -74,6 +74,9 @@ import ru.ngscanner.report.ReportRepository
 import ru.ngscanner.report.buildTranscript
 import ru.ngscanner.report.parseReport
 import ru.ngscanner.report.toMarkdown
+import ru.ngscanner.triage.TriageCode
+import ru.ngscanner.triage.TriageEngine
+import ru.ngscanner.triage.TriageFacts
 import ru.ngscanner.service.ObdForegroundService
 import ru.ngscanner.settings.AppSettings
 import ru.ngscanner.settings.ChatRepository
@@ -983,15 +986,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         // Шаг инструмента — не строка в чате, а сменяющийся статус под спиннером.
                         is AgentEvent.ToolCall -> _ui.update { it.copy(agentStatus = toolStatusText(event.name)) }
                         // Структурный вердикт: текст кладём для истории/экспорта, а UI
-                        // рисует по verdict карточку с проверенным заземлением.
+                        // рисует по verdict карточку с проверенным заземлением. Здесь же —
+                        // второе мнение движка правил: если бортовые данные строже вердикта
+                        // модели, это показывается пользователю (правила не галлюцинируют).
                         is AgentEvent.Verdict -> {
-                            appendChat(
-                                ChatMessage(
-                                    ChatRole.ASSISTANT,
-                                    event.verdict.toPlainText(),
-                                    verdict = event.verdict,
-                                ),
-                            )
+                            val local = TriageEngine.analyze(localFacts())
+                            val note = TriageEngine.crossCheck(event.verdict, local)
+                            val v = if (note != null) event.verdict.copy(crossCheck = note) else event.verdict
+                            appendChat(ChatMessage(ChatRole.ASSISTANT, v.toPlainText(), verdict = v))
                             _ui.update { it.copy(agentStatus = null) }
                         }
                         is AgentEvent.Usage -> recordUsage(reqProvider, reqModel, event.prompt, event.completion)
@@ -1027,9 +1029,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         diagnoseJob?.cancel()
     }
 
+    /** Коды из текстового ответа инструмента + расшифровка по бортовой базе. */
+    private suspend fun codesFrom(toolOutput: String): List<TriageCode> =
+        DTC_RE.findAll(toolOutput).map { it.value.uppercase() }.distinct().toList().map { code ->
+            TriageCode(code, DtcDatabase.describe(getApplication(), code) ?: "неизвестный код")
+        }
+
     /**
-     * Офлайн-диагностика без ИИ и интернета: читает коды с адаптера, расшифровывает
-     * по бортовой базе DTC и отмечает параметры вне нормы. Работает там, где нет сети.
+     * Факты о машине из текущего состояния — для второго мнения движка правил рядом с
+     * вердиктом модели. Параметры идут с опроса всегда, коды — если их читали.
+     */
+    private fun localFacts(): TriageFacts {
+        val items = _ui.value.dtcItems
+        fun of(cat: DtcCategory) = items.filter { it.category == cat }
+            .map { TriageCode(it.code, it.description.orEmpty()) }
+        return TriageFacts(
+            activeCodes = of(DtcCategory.ACTIVE),
+            pendingCodes = of(DtcCategory.PENDING),
+            permanentCodes = of(DtcCategory.PERMANENT),
+            metrics = _ui.value.metrics,
+        )
+    }
+
+    /**
+     * Офлайн-диагностика без ИИ и интернета: читает коды с адаптера, расшифровывает по
+     * бортовой базе и прогоняет через детерминированный движок правил
+     * ([TriageEngine]) — на выходе такой же структурный вердикт, как у модели, только
+     * без сети, без ключа и без риска галлюцинаций. Работает там, где нет интернета.
      */
     fun localDiagnose() {
         val adapter = elm
@@ -1051,8 +1077,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val active = executor.execute(ToolCall("l1", "read_dtcs", "{}")).content
                 val pending = executor.execute(ToolCall("l2", "read_pending_dtcs", "{}")).content
                 val permanent = executor.execute(ToolCall("l3", "read_permanent_dtcs", "{}")).content
-                val readiness = executor.execute(ToolCall("l4", "read_readiness", "{}")).content
-                appendChat(ChatMessage(ChatRole.ASSISTANT, buildLocalReport(active, pending, permanent, readiness, _ui.value.metrics)))
+                // Готовность мониторов берём структурно, а не парсингом собственного текста.
+                val incomplete = runCatching {
+                    ObdParser.parseReadiness(adapter.command("0101"), adapter.headerHexLen())
+                        ?.monitors.orEmpty().filterNot { it.ready }.map { it.name }
+                }.getOrDefault(emptyList())
+                val verdict = TriageEngine.analyze(
+                    TriageFacts(
+                        activeCodes = codesFrom(active),
+                        pendingCodes = codesFrom(pending),
+                        permanentCodes = codesFrom(permanent),
+                        metrics = _ui.value.metrics,
+                        readinessIncomplete = incomplete,
+                    ),
+                )
+                appendChat(ChatMessage(ChatRole.ASSISTANT, verdict.toPlainText(), verdict = verdict))
             } catch (ex: Exception) {
                 appendChat(ChatMessage(ChatRole.SYSTEM, "Ошибка локальной диагностики: ${ex.message}"))
             } finally {
@@ -1063,40 +1102,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun buildLocalReport(
-        active: String,
-        pending: String,
-        permanent: String,
-        readiness: String,
-        metrics: Map<ObdPid, Double>,
-    ): String {
-        val sb = StringBuilder("**Локальная диагностика** — по бортовой базе, без ИИ\n\n")
-        sb.append("**Коды неисправностей**\n").append(active).append("\n\n")
-        if (!pending.contains("не обнаружены")) sb.append(pending).append("\n\n")
-        // Постоянные коды показываем только если они реально есть (не стёрты сбросом).
-        if (!permanent.contains("не обнаружены") && !permanent.contains("NO DATA") &&
-            !permanent.contains("НЕТ СВЯЗИ")) {
-            sb.append(permanent).append("\n\n")
-        }
-        // Готовность мониторов — важна перед ТО и после сброса кодов.
-        if (readiness.startsWith("Готовность")) sb.append(readiness).append("\n\n")
-
-        val abnormal = metrics.filter { (pid, v) ->
-            (pid.critHigh != null && v >= pid.critHigh) || (pid.warnHigh != null && v >= pid.warnHigh) ||
-                (pid.critLow != null && v <= pid.critLow) || (pid.warnLow != null && v <= pid.warnLow)
-        }
-        if (abnormal.isNotEmpty()) {
-            sb.append("**Параметры вне нормы**\n")
-            abnormal.forEach { (pid, v) ->
-                val value = if (v == v.toLong().toDouble()) v.toLong().toString() else "%.1f".format(v)
-                sb.append("• ${pid.label}: $value ${pid.unit} (норма ${pid.norm})\n")
-            }
-            sb.append('\n')
-        }
-        sb.append("_Это офлайн-вывод по кодам и параметрам. Для развёрнутого разбора причин " +
-            "включите интернет и запустите диагностику через ИИ._")
-        return sb.toString()
-    }
 
     // ---- Экран кодов неисправностей ----
 
@@ -2011,6 +2016,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 "recommendations (массив строк — что проверить или сделать). " +
                 "ЗАЗЕМЛЕНИЕ: бери факты ТОЛЬКО из переписки, НЕ выдумывай коды, значения и причины; " +
                 "если вердикт не выведен — statusLabel=НУЖНЫ ДАННЫЕ."
+
+        /** Коды OBD-II в тексте ответа инструмента: P/B/C/U + 4 hex (первый — 0..3). */
+        private val DTC_RE = Regex("\\b[PBCU][0-3][0-9A-F]{3}\\b", RegexOption.IGNORE_CASE)
 
         private const val TAG = "MainViewModel"
         private const val PERF_RETRY_MS = 50L // пауза после промаха чтения скорости в замере
