@@ -176,6 +176,7 @@ internal fun GarageTab(ui: UiState, vm: MainViewModel) {
                     onUpdateMileage = { vm.updateActiveCarMileage(it) },
                     onGenerateReport = { vm.generateReport(car.id) },
                     onOpenReport = { nav = GarageNav.Report(car.id, it) },
+                    onDeleteReport = { vm.deleteReport(it) },
                 )
             }
         }
@@ -457,6 +458,7 @@ private fun CarDetailScreen(
     onUpdateMileage: (Int) -> Unit,
     onGenerateReport: () -> Unit,
     onOpenReport: (String) -> Unit,
+    onDeleteReport: (String) -> Unit,
 ) {
     var showEntry by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
@@ -488,6 +490,7 @@ private fun CarDetailScreen(
             error = reportError,
             onGenerate = onGenerateReport,
             onOpen = onOpenReport,
+            onDelete = onDeleteReport,
         )
         LogbookSection(car.log, onAdd = { showEntry = true }, onDeleteEntry = onDeleteEntry)
         Spacer(Modifier.height(16.dp))
@@ -897,6 +900,7 @@ private fun ReportsSection(
     error: String?,
     onGenerate: () -> Unit,
     onOpen: (String) -> Unit,
+    onDelete: (String) -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -939,16 +943,19 @@ private fun ReportsSection(
                 color = cs.onSurfaceVariant,
             )
         } else {
-            reports.forEach { meta -> ReportRow(meta, onClick = { onOpen(meta.id) }) }
+            reports.forEach { meta ->
+                ReportRow(meta, onClick = { onOpen(meta.id) }, onDelete = { onDelete(meta.id) })
+            }
         }
     }
 }
 
 @Composable
-private fun ReportRow(meta: ReportMeta, onClick: () -> Unit) {
+private fun ReportRow(meta: ReportMeta, onClick: () -> Unit, onDelete: () -> Unit) {
     val cs = MaterialTheme.colorScheme
+    var confirm by remember { mutableStateOf(false) }
     ElevatedCard(onClick = onClick, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(start = 14.dp, top = 14.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
                     meta.title,
@@ -968,8 +975,25 @@ private fun ReportRow(meta: ReportMeta, onClick: () -> Unit) {
                     StatusBadge(meta.statusLabel)
                 }
             }
+            // Удаление прямо из списка — не заставляем открывать протокол ради этого.
+            IconButton(onClick = { confirm = true }) {
+                Icon(Icons.Rounded.DeleteOutline, "Удалить протокол", Modifier.size(18.dp), tint = cs.onSurfaceVariant)
+            }
             Icon(Icons.Rounded.ChevronRight, null, tint = cs.onSurfaceVariant)
+            Spacer(Modifier.width(8.dp))
         }
+    }
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            icon = { Icon(Icons.Rounded.DeleteOutline, null, tint = cs.error) },
+            title = { Text("Удалить протокол?") },
+            text = { Text("«${meta.title}» будет удалён без возможности восстановления.") },
+            confirmButton = {
+                TextButton(onClick = { confirm = false; onDelete() }) { Text("Удалить", color = cs.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Отмена") } },
+        )
     }
 }
 
